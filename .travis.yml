@@ -64,36 +64,6 @@ script:
   - "make -s $JOBS test-all -o exts TESTOPTS='-q --color=never --job-status=normal'"
   - "make -s $JOBS test-spec MSPECOPT=-j"
 
-# Branch matrix.  Not all branches are Travis-ready so we limit branches here.
-branches:
-  only:
-    - trunk
-    - ruby_2_2
-    - ruby_2_3
-    - ruby_2_4
-    - /^feature\//
-    - /^bug\//
-
-# We want to be notified when something happens.
-notifications:
-  irc:
-    channels:
-      - "chat.freenode.net#ruby-core"
-      - "chat.freenode.net#ruby-ja"
-    on_success: change # [always|never|change] # default: always
-    on_failure: always # [always|never|change] # default: always
-    template:
-      - "%{message} by @%{author}: See %{build_url}"
-
-  slack:
-    secure: crR7xx7uiv0dEE2tM14umgn0THOknlXoAU1S7W9efKkKUf7bmg87dE7Tii+VKIVvxZGOiIPa6DEbtXsia/yLjC6nsAWQzwRKeeVTcGOvyA5nyPBArLsYjkczxWASHCttqckA20PH75YRZsQErwd/bzvKP/nWGBTbk3sHBLDyEZI=
-    on_pull_requests: false
-    on_success: change
-    on_failure: always
-
-  email:
-    - ko1c-failure@atdot.net
-
 # Local Variables:
 # mode: YAML
 # coding: utf-8-unix
