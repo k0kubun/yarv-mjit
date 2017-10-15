@@ -94,6 +94,7 @@ COMMONOBJS    = array.$(OBJEXT) \
 		marshal.$(OBJEXT) \
 		math.$(OBJEXT) \
 		mjit.$(OBJEXT) \
+		mjit_compile.$(OBJEXT) \
 		node.$(OBJEXT) \
 		numeric.$(OBJEXT) \
 		object.$(OBJEXT) \
@@ -1832,6 +1833,7 @@ gc.$(OBJEXT): {$(VPATH)}internal.h
 gc.$(OBJEXT): {$(VPATH)}io.h
 gc.$(OBJEXT): {$(VPATH)}method.h
 gc.$(OBJEXT): {$(VPATH)}missing.h
+gc.$(OBJEXT): {$(VPATH)}mjit.h
 gc.$(OBJEXT): {$(VPATH)}node.h
 gc.$(OBJEXT): {$(VPATH)}onigmo.h
 gc.$(OBJEXT): {$(VPATH)}oniguruma.h
@@ -1971,6 +1973,7 @@ iseq.$(OBJEXT): {$(VPATH)}iseq.c
 iseq.$(OBJEXT): {$(VPATH)}iseq.h
 iseq.$(OBJEXT): {$(VPATH)}method.h
 iseq.$(OBJEXT): {$(VPATH)}missing.h
+iseq.$(OBJEXT): {$(VPATH)}mjit.h
 iseq.$(OBJEXT): {$(VPATH)}node.h
 iseq.$(OBJEXT): {$(VPATH)}node_name.inc
 iseq.$(OBJEXT): {$(VPATH)}onigmo.h
@@ -1987,6 +1990,10 @@ iseq.$(OBJEXT): {$(VPATH)}vm_debug.h
 iseq.$(OBJEXT): {$(VPATH)}vm_opts.h
 mjit.$(OBJEXT): {$(VPATH)}mjit.c
 mjit.$(OBJEXT): {$(VPATH)}mjit.h
+mjit.$(OBJEXT): {$(VPATH)}version.h
+mjit.$(OBJEXT): {$(VPATH)}vm_core.h
+mjit_compile.$(OBJEXT): {$(VPATH)}mjit_compile.c
+mjit_compile.$(OBJEXT): {$(VPATH)}vm_core.h
 load.$(OBJEXT): $(CCAN_DIR)/check_type/check_type.h
 load.$(OBJEXT): $(CCAN_DIR)/container_of/container_of.h
 load.$(OBJEXT): $(CCAN_DIR)/list/list.h
