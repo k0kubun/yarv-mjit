@@ -102,6 +102,18 @@ static int current_unit_num;
 static pthread_mutex_t mjit_engine_mutex;
 /* A thread conditional to wake up `mjit_finish` at the end of PCH thread.  */
 static pthread_cond_t mjit_pch_wakeup;
+/* A thread conditional to wake up the client if there is a change in
+   executed unit status.  */
+static pthread_cond_t mjit_client_wakeup;
+/* A thread conditional to wake up a worker if there we have something
+   to add or we need to stop MJIT engine.  */
+static pthread_cond_t mjit_worker_wakeup;
+/* A thread conditional to wake up workers if at the end of GC.  */
+static pthread_cond_t mjit_gc_wakeup;
+/* True when GC is working.  */
+static int in_gc;
+/* True when JIT is working.  */
+static int in_jit;
 
 /* Defined in the client thread before starting MJIT threads:  */
 /* Used C compiler path.  */
@@ -123,6 +135,12 @@ get_string(const char *str)
     return res;
 }
 
+static void
+sprint_uniq_filename(char *str, unsigned long id, const char *prefix, const char *suffix)
+{
+    sprintf(str, "/tmp/%sp%luu%lu%s", prefix, (unsigned long) getpid(), id, suffix);
+}
+
 /* Return an unique file name in /tmp with PREFIX and SUFFIX and
    number ID.  Use getpid if ID == 0.  The return file name exists
    until the next function call.  */
@@ -130,8 +148,7 @@ static char *
 get_uniq_filename(unsigned long id, const char *prefix, const char *suffix)
 {
     char str[70];
-
-    sprintf(str, "/tmp/%sp%luu%lu%s", prefix, (unsigned long) getpid(), id, suffix);
+    sprint_uniq_filename(str, id, prefix, suffix);
     return get_string(str);
 }
 
@@ -278,6 +295,182 @@ CRITICAL_SECTION_FINISH(int level, const char *msg)
     pthread_mutex_unlock(&mjit_engine_mutex);
 }
 
+/* Wait until workers don't compile any iseq.  It is called at the
+   start of GC.  */
+void
+mjit_gc_start_hook()
+{
+    if (!mjit_init_p)
+	return;
+    CRITICAL_SECTION_START(4, "mjit_gc_start_hook");
+    while (in_jit) {
+	verbose(4, "Waiting wakeup from a worker for GC");
+	pthread_cond_wait(&mjit_client_wakeup, &mjit_engine_mutex);
+	verbose(4, "Getting wakeup from a worker for GC");
+    }
+    in_gc = TRUE;
+    CRITICAL_SECTION_FINISH(4, "mjit_gc_start_hook");
+}
+
+/* Send a signal to workers to continue iseq compilations.  It is
+   called at the end of GC.  */
+void
+mjit_gc_finish_hook()
+{
+    if (!mjit_init_p)
+	return;
+    CRITICAL_SECTION_START(4, "mjit_gc_finish_hook");
+    in_gc = FALSE;
+    verbose(4, "Sending wakeup signal to workers after GC");
+    if (pthread_cond_broadcast(&mjit_gc_wakeup) != 0) {
+        fprintf(stderr, "Cannot send wakeup signal to workers in mjit_gc_finish_hook\n");
+    }
+    CRITICAL_SECTION_FINISH(4, "mjit_gc_finish_hook");
+}
+
+/* Iseqs can be garbage collected.  This function should call when it
+   happens.  It removes iseq from the unit.  */
+void
+mjit_free_iseq(const rb_iseq_t *iseq)
+{
+    if (!mjit_init_p)
+	return;
+    CRITICAL_SECTION_START(4, "mjit_free_iseq");
+    if (iseq->body->jit_unit) {
+	iseq->body->jit_unit->iseq = NULL;
+    }
+    /* TODO: unload unit */
+    CRITICAL_SECTION_FINISH(4, "mjit_free_iseq");
+}
+
+/* Add unit UNIT to the tail of doubly linked LIST.  It should be not in
+   the list before.  */
+static void
+add_to_unit_queue(struct rb_mjit_unit *unit)
+{
+    /* Append iseq to list */
+    if (unit_queue == NULL) {
+	unit_queue = unit;
+    } else {
+	struct rb_mjit_unit *tail = unit_queue;
+	while (tail->next != NULL) {
+	    tail = tail->next;
+	}
+	tail->next = unit;
+	unit->prev = tail;
+    }
+}
+
+static void
+remove_from_unit_queue(struct rb_mjit_unit *unit)
+{
+    if (unit->prev && unit->next) {
+	unit->prev->next = unit->next;
+	unit->next->prev = unit->prev;
+    } else if (unit->prev == NULL && unit->next) {
+	unit_queue = unit->next;
+	unit->next->prev = NULL;
+    } else if (unit->prev && unit->next == NULL) {
+	unit->prev->next = NULL;
+    } else {
+	unit_queue = NULL;
+    }
+}
+
+/* Remove and return the best unit from unit_queue.  The best
+   is the first high priority unit or the unit whose iseq has the
+   biggest number of calls so far.  */
+static struct rb_mjit_unit *
+get_from_unit_queue()
+{
+    struct rb_mjit_unit *unit, *dequeued = NULL;
+
+    if (unit_queue == NULL)
+	return NULL;
+
+    /* Find iseq with max total_calls */
+    for (unit = unit_queue; unit != NULL; unit = unit ? unit->next : NULL) {
+	if (unit->iseq == NULL) {
+	    continue; /* TODO: GCed. remove from queue and free */
+	}
+
+	if (dequeued == NULL || dequeued->iseq->body->total_calls < unit->iseq->body->total_calls) {
+	    dequeued = unit;
+	}
+    }
+
+    if (dequeued)
+	remove_from_unit_queue(dequeued);
+    return dequeued;
+}
+
+static void
+compile_c_to_so(const char *c_file, const char *so_file)
+{
+    /* TODO: impl */
+}
+
+static void *
+load_func_from_so(const char *so_file, const char *funcname)
+{
+    return NULL; /* TODO: impl */
+}
+
+/* Compile ISeq in UNIT and return function pointer of JIT-ed code.
+   It may return NOT_COMPILABLE_JIT_ISEQ_FUNC if something went wrong. */
+static void *
+convert_unit_to_func(struct rb_mjit_unit *unit)
+{
+    char c_file[70], so_file[70], funcname[35];
+    int success;
+    FILE *f;
+    void *func;
+
+    sprint_uniq_filename(c_file, unit->id, "_mjit", ".c");
+    sprint_uniq_filename(so_file, unit->id, "_mjit", ".so");
+    sprintf(funcname, "_mjit%d", unit->id);
+    f = fopen(c_file, "w");
+
+    /* wait until mjit_gc_finish_hook is called */
+    CRITICAL_SECTION_START(3, "before mjit_compile to wait GC finish");
+    while (in_gc) {
+	verbose(3, "Waiting wakeup from GC");
+	pthread_cond_wait(&mjit_gc_wakeup, &mjit_engine_mutex);
+    }
+    in_jit = TRUE;
+    CRITICAL_SECTION_FINISH(3, "before mjit_compile to wait GC finish");
+
+    verbose(2, "compile: %s@%s:%d -> %s", RSTRING_PTR(unit->iseq->body->location.label),
+	    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
+    success = mjit_compile(f, unit->iseq->body, funcname);
+
+    /* release blocking mjit_gc_start_hook */
+    CRITICAL_SECTION_START(3, "after mjit_compile to wakeup client for GC");
+    in_jit = FALSE;
+    verbose(3, "Sending wakeup signal to client in a mjit-worker for GC");
+    if (pthread_cond_signal(&mjit_client_wakeup) != 0) {
+	fprintf(stderr, "Cannot send wakeup signal to client in mjit-worker\n");
+    }
+    CRITICAL_SECTION_FINISH(3, "in worker to wakeup client for GC");
+
+    fclose(f);
+    if (!success) {
+	if (!mjit_opts.save_temps)
+	    remove(c_file);
+	return (void *)NOT_COMPILABLE_JIT_ISEQ_FUNC;
+    }
+
+    compile_c_to_so(c_file, so_file);
+    if (!mjit_opts.save_temps)
+	remove(c_file);
+
+    func = load_func_from_so(so_file, funcname);
+    if (!mjit_opts.save_temps)
+	remove(so_file);
+
+    return func;
+}
+
 /* XXX_COMMONN_ARGS define the command line arguments of XXX C
    compiler used by MJIT.
 
@@ -355,6 +548,11 @@ make_pch()
     CRITICAL_SECTION_FINISH(3, "in make_pch");
 }
 
+/* Set to TRUE to finish worker.  */
+static int finish_worker_p;
+/* Set to TRUE if worker is finished.  */
+static int worker_finished;
+
 /* The function implementing a worker. It is executed in a separate
    thread started by pthread_create. It compiles precompiled header
    and then compiles requested ISeqs. */
@@ -366,25 +564,48 @@ worker(void *arg)
     }
 
     make_pch();
-    return NULL;
-}
-
-/* Add unit UNIT to the tail of doubly linked LIST.  It should be not in
-   the list before.  */
-static void
-add_to_unit_queue(struct rb_mjit_unit *unit)
-{
-    /* Append iseq to list */
-    if (unit_queue == NULL) {
-	unit_queue = unit;
-    } else {
-	struct rb_mjit_unit *tail = unit_queue;
-	while (tail->next != NULL) {
-	    tail = tail->next;
+    if (pch_status == PCH_FAILED) {
+	mjit_init_p = FALSE;
+	CRITICAL_SECTION_START(3, "in worker to update worker_finished");
+	worker_finished = TRUE;
+	verbose(3, "Sending wakeup signal to client in a mjit-worker");
+	if (pthread_cond_signal(&mjit_client_wakeup) != 0) {
+	    fprintf(stderr, "Cannot send wakeup signal to client in mjit-worker\n");
 	}
-	tail->next = unit;
-	unit->prev = tail;
+	CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
+	return NULL;
     }
+
+    /* main worker loop */
+    while (!finish_worker_p) {
+	struct rb_mjit_unit *unit;
+
+	/* wait until unit is available */
+	CRITICAL_SECTION_START(3, "in worker dequeue");
+	while (unit_queue == NULL && !finish_worker_p) {
+	    pthread_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
+	    verbose(3, "Getting wakeup from client");
+	}
+	unit = get_from_unit_queue();
+	CRITICAL_SECTION_FINISH(3, "in worker dequeue");
+
+	if (unit) {
+	    void *func;
+	    func = convert_unit_to_func(unit);
+
+	    CRITICAL_SECTION_START(3, "in jit func replace");
+	    if (unit->iseq) { /* Check whether GCed or not */
+		/* Usage of jit_code might be not in a critical section.  */
+		ATOMIC_SET(unit->iseq->body->jit_func, func);
+	    }
+	    CRITICAL_SECTION_FINISH(3, "in jit func replace");
+	}
+    }
+
+    CRITICAL_SECTION_START(3, "in the end of worker to update worker_finished");
+    worker_finished = TRUE;
+    CRITICAL_SECTION_FINISH(3, "in the end of worker to update worker_finished");
+    return NULL;
 }
 
 /* Create unit for ISEQ. */
@@ -496,13 +717,18 @@ mjit_init(struct mjit_options *opts)
 
     /* Initialize mutex */
     if (pthread_mutex_init(&mjit_engine_mutex, NULL) != 0
-	|| pthread_cond_init(&mjit_pch_wakeup, NULL) != 0) {
+	|| pthread_cond_init(&mjit_pch_wakeup, NULL) != 0
+	|| pthread_cond_init(&mjit_client_wakeup, NULL) != 0
+	|| pthread_cond_init(&mjit_worker_wakeup, NULL) != 0
+	|| pthread_cond_init(&mjit_gc_wakeup, NULL) != 0) {
 	mjit_init_p = FALSE;
 	verbose(1, "Failure in MJIT mutex initialization\n");
 	return;
     }
 
     /* Initialize worker thread */
+    finish_worker_p = FALSE;
+    worker_finished = FALSE;
     pthread_atfork(NULL, NULL, child_after_fork);
     if (pthread_attr_init(&attr) == 0
 	&& pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM) == 0
@@ -512,6 +738,10 @@ mjit_init(struct mjit_options *opts)
     } else {
 	mjit_init_p = FALSE;
 	pthread_mutex_destroy(&mjit_engine_mutex);
+	pthread_cond_destroy(&mjit_pch_wakeup);
+	pthread_cond_destroy(&mjit_client_wakeup);
+	pthread_cond_destroy(&mjit_worker_wakeup);
+	pthread_cond_destroy(&mjit_gc_wakeup);
 	verbose(1, "Failure in MJIT thread initialization\n");
     }
 }
@@ -525,6 +755,7 @@ mjit_finish()
     if (!mjit_init_p)
 	return;
 
+    /* Wait for pch finish */
     verbose(2, "Canceling pch and worker threads");
     CRITICAL_SECTION_START(3, "in mjit_finish to wakeup from pch");
     /* As our threads are detached, we could just cancel them.  But it
@@ -538,17 +769,31 @@ mjit_finish()
     }
     CRITICAL_SECTION_FINISH(3, "in mjit_finish to wakeup from pch");
 
-    /* start to finish compilation */
-    mjit_init_p = FALSE;
+    /* Stop worker */
+    finish_worker_p = TRUE;
+    while (!worker_finished) {
+	verbose(3, "Sending cancel signal to workers");
+	CRITICAL_SECTION_START(3, "in mjit_finish");
+	if (pthread_cond_broadcast(&mjit_worker_wakeup) != 0) {
+	    fprintf(stderr, "Cannot send wakeup signal to workers in mjit_finish\n");
+	}
+	CRITICAL_SECTION_FINISH(3, "in mjit_finish");
+    }
 
     pthread_mutex_destroy(&mjit_engine_mutex);
     pthread_cond_destroy(&mjit_pch_wakeup);
+    pthread_cond_destroy(&mjit_client_wakeup);
+    pthread_cond_destroy(&mjit_worker_wakeup);
+    pthread_cond_destroy(&mjit_gc_wakeup);
 
     /* cleanup temps */
     if (!mjit_opts.save_temps)
 	remove(pch_file);
 
+    xfree(pch_file); pch_file = NULL;
+    xfree(header_file); header_file = NULL;
     /* TODO: free unit_queue */
 
+    mjit_init_p = FALSE;
     verbose(1, "Successful MJIT finish");
 }
