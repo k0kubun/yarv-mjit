@@ -185,7 +185,7 @@ SHOWFLAGS = showflags
 
 all: $(SHOWFLAGS) main docs
 
-main: $(SHOWFLAGS) exts $(ENCSTATIC:static=lib)encs
+main: $(SHOWFLAGS) exts $(ENCSTATIC:static=lib)encs rb_mjit_header-$(RUBY_PROGRAM_VERSION).h
 	@$(NULLCMD)
 
 .PHONY: showflags
@@ -293,7 +293,11 @@ ruby.imp: $(COMMONOBJS)
 	awk 'BEGIN{print "#!"}; $$2~/^[BDT]$$/&&$$1!~/^(Init_|ruby_static_id_|.*_threadptr_|rb_ec_\.)/{print $$1}' | \
 	sort -u -o $@
 
-install: install-$(INSTALLDOC)
+install: install-rb-mjit-header install-$(INSTALLDOC)
+
+install-rb-mjit-header: rb_mjit_header-$(RUBY_PROGRAM_VERSION).h
+	$(Q)$(INSTALL_DATA) $< $(arch_hdrdir)
+
 docs: $(DOCTARGETS)
 pkgconfig-data: $(ruby_pc)
 $(ruby_pc): $(srcdir)/template/ruby.pc.in config.status
@@ -564,7 +568,7 @@ distclean-rubyspec: distclean-spec
 realclean:: realclean-ext realclean-local realclean-enc realclean-golf realclean-extout
 realclean-local:: distclean-local
 	$(Q)$(RM) parse.c parse.h lex.c enc/trans/newline.c revision.h
-	$(Q)$(RM) id.c id.h probes.dmyh
+	$(Q)$(RM) id.c id.h probes.dmyh rb_mjit_header-$(RUBY_PROGRAM_VERSION).h
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) parse.c parse.h lex.c enc/trans/newline.c $(PRELUDES) revision.h
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) id.c id.h probes.dmyh
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) configure aclocal.m4 tool/config.guess tool/config.sub gems/*.gem
@@ -947,6 +951,10 @@ known_errors.inc: $(srcdir)/template/known_errors.inc.tmpl $(srcdir)/defs/known_
 vm_call_iseq_optimized.inc: $(srcdir)/tool/mk_call_iseq_optimized.rb
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) $(srcdir)/tool/mk_call_iseq_optimized.rb > $@
+
+rb_mjit_header-$(RUBY_PROGRAM_VERSION).h: PHONY probes.h
+	@$(ECHO) building $@
+	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER $(srcdir)/vm.c $(COUTFLAG) $@ -E
 
 $(MINIPRELUDE_C): $(COMPILE_PRELUDE)
 	$(ECHO) generating $@
