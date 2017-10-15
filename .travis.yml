@@ -60,6 +60,7 @@ before_script:
   - "make -s $JOBS"
 
 script:
+  - "git clone --depth 1 https://github.com/mame/optcarrot && ./ruby -I../lib -I. -I./.ext/x86_64-linux -j:l optcarrot/bin/optcarrot --benchmark optcarrot/examples/Lan_Master.nes"
   - "make -s test TESTOPTS=--color=never"
   - "make -s $JOBS test-all -o exts TESTOPTS='-q --color=never --job-status=normal'"
   - "make -s $JOBS test-spec MSPECOPT=-j"
