@@ -272,7 +272,7 @@ usage(const char *name, int help)
 	M("l",     ", llvm",           "Use LLVM clang instead of GCC"), /* TODO: change to -j:c=gcc, -j:c=clang, ... */
 	M("w",     ", warnings",       "Enable printing MJIT warnings"),
 	M("d",     ", debug",          "Enable MJIT debugging (very slow)"),
-	M("v=num", ", verbose=num",    "Print MJIT logs to stderr; 0=silence, 1=medium, 2=verbose"),
+	M("v=num", ", verbose=num",    "Print MJIT logs of level num or less to stderr"),
 	M("n=num", ", num-cache=num",  "Maximum number of JIT codes in a cache"),
     };
     int i;

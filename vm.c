@@ -295,6 +295,7 @@ static VALUE vm_invoke_bmethod(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 static VALUE vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 			    int argc, const VALUE *argv, VALUE block_handler);
 
+#include "mjit.h"
 #include "vm_insnhelper.h"
 #include "vm_exec.h"
 #include "vm_insnhelper.c"
@@ -1793,7 +1794,8 @@ vm_exec(rb_thread_t *th)
     _tag.retval = Qnil;
     if ((state = EXEC_TAG()) == TAG_NONE) {
       vm_loop_start:
-	result = vm_exec_core(th, initial);
+	if ((result = mjit_exec(th)) == Qundef)
+	    result = vm_exec_core(th, initial);
 	VM_ASSERT(th->ec.tag == &_tag);
 	if ((state = _tag.state) != TAG_NONE) {
 	    err = (struct vm_throw_data *)result;
