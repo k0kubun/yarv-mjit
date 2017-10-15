@@ -294,6 +294,9 @@ pathobj_realpath(VALUE pathobj)
     }
 }
 
+/* A forward declaration  */
+struct rb_mjit_unit;
+
 struct rb_iseq_constant_body {
     enum iseq_type {
 	ISEQ_TYPE_TOP,
@@ -410,6 +413,11 @@ struct rb_iseq_constant_body {
     unsigned int ci_kw_size;
     unsigned int insns_info_size;
     unsigned int stack_max; /* for stack overflow check */
+
+    /* The following MJIT related info.  */
+    void *jit_func;
+    long unsigned total_calls; /* number of total calls with `jit_exec()` */
+    struct rb_mjit_unit *jit_unit;
 };
 
 /* T_IMEMO/iseq */
