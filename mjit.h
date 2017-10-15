@@ -54,8 +54,12 @@ extern int mjit_init_p;
 extern void mjit_add_iseq_to_process(const rb_iseq_t *iseq);
 RUBY_SYMBOL_EXPORT_END
 
+extern int mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *funcname);
 extern void mjit_init(struct mjit_options *opts);
 extern void mjit_finish();
+extern void mjit_gc_start_hook();
+extern void mjit_gc_finish_hook();
+extern void mjit_free_iseq(const rb_iseq_t *iseq);
 
 /* A threshold used to add iseq to JIT. */
 #define NUM_CALLS_TO_ADD 5
