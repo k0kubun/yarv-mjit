@@ -18,6 +18,8 @@
 #include "ruby/config.h"
 #include "debug_counter.h"
 
+#ifndef MJIT_HEADER
+
 /* control stack frame */
 
 static rb_control_frame_t *vm_get_ruby_level_caller_cfp(const rb_execution_context_t *ec, const rb_control_frame_t *cfp);
@@ -269,6 +271,8 @@ rb_vm_push_frame(rb_execution_context_t *ec,
     return vm_push_frame(ec, iseq, type, self, specval, cref_or_me, pc, sp, local_size, stack_max);
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 /* return TRUE if the frame is finished */
 static inline int
 vm_pop_frame(rb_execution_context_t *ec, rb_control_frame_t *cfp, const VALUE *ep)
@@ -282,6 +286,8 @@ vm_pop_frame(rb_execution_context_t *ec, rb_control_frame_t *cfp, const VALUE *e
 
     return flags & VM_FRAME_FLAG_FINISH;
 }
+
+#ifndef MJIT_HEADER
 
 void
 rb_vm_pop_frame(rb_execution_context_t *ec)
@@ -3017,6 +3023,8 @@ vm_check_keyword(lindex_t bits, lindex_t idx, const VALUE *ep)
     }
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static void
 vm_dtrace(rb_event_flag_t flag, rb_thread_t *th)
 {
@@ -3041,6 +3049,8 @@ vm_dtrace(rb_event_flag_t flag, rb_thread_t *th)
 	}
     }
 }
+
+#ifndef MJIT_HEADER
 
 static VALUE
 vm_const_get_under(ID id, rb_num_t flags, VALUE cbase)
@@ -3722,3 +3732,5 @@ vm_opt_regexpmatch2(VALUE recv, VALUE obj)
 	return Qundef;
     }
 }
+
+#endif /* #ifndef MJIT_HEADER */
