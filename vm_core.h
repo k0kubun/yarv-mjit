@@ -1658,8 +1658,10 @@ struct rb_trace_arg_struct {
     VALUE path;
 };
 
+RUBY_SYMBOL_EXPORT_BEGIN
 void rb_threadptr_exec_event_hooks(struct rb_trace_arg_struct *trace_arg);
 void rb_threadptr_exec_event_hooks_and_pop_frame(struct rb_trace_arg_struct *trace_arg);
+RUBY_SYMBOL_EXPORT_END
 
 #define EXEC_EVENT_HOOK_ORIG(th_, flag_, self_, id_, called_id_, klass_, data_, pop_p_) do { \
     const rb_event_flag_t flag_arg_ = (flag_); \
