@@ -16,6 +16,7 @@
 #include "vm_core.h"
 #include "iseq.h"
 #include "eval_intern.h"
+#ifndef MJIT_HEADER
 #include "probes.h"
 #include "probes_helper.h"
 
@@ -295,10 +296,16 @@ static VALUE vm_make_env_object(const rb_execution_context_t *ec, rb_control_fra
 static VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 static VALUE vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 
+
+#endif /* #ifndef MJIT_HEADER */
+
 #include "mjit.h"
 #include "vm_insnhelper.h"
 #include "vm_exec.h"
 #include "vm_insnhelper.c"
+
+#ifndef MJIT_HEADER
+
 #include "vm_exec.c"
 
 #include "vm_method.c"
@@ -3377,3 +3384,5 @@ vm_collect_usage_register(int reg, int isset)
 #endif
 
 #include "vm_call_iseq_optimized.inc" /* required from vm_insnhelper.c */
+
+#endif /* #ifndef MJIT_HEADER */

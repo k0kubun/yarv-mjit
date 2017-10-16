@@ -70,6 +70,7 @@
    WNOHANG waitpid would be very complicated.  */
 
 #include <sys/wait.h>
+#include <dlfcn.h>
 #include "vm_core.h"
 #include "mjit.h"
 #include "version.h"
@@ -404,73 +405,6 @@ get_from_unit_queue()
     return dequeued;
 }
 
-static void
-compile_c_to_so(const char *c_file, const char *so_file)
-{
-    /* TODO: impl */
-}
-
-static void *
-load_func_from_so(const char *so_file, const char *funcname)
-{
-    return NULL; /* TODO: impl */
-}
-
-/* Compile ISeq in UNIT and return function pointer of JIT-ed code.
-   It may return NOT_COMPILABLE_JIT_ISEQ_FUNC if something went wrong. */
-static void *
-convert_unit_to_func(struct rb_mjit_unit *unit)
-{
-    char c_file[70], so_file[70], funcname[35];
-    int success;
-    FILE *f;
-    void *func;
-
-    sprint_uniq_filename(c_file, unit->id, "_mjit", ".c");
-    sprint_uniq_filename(so_file, unit->id, "_mjit", ".so");
-    sprintf(funcname, "_mjit%d", unit->id);
-    f = fopen(c_file, "w");
-
-    /* wait until mjit_gc_finish_hook is called */
-    CRITICAL_SECTION_START(3, "before mjit_compile to wait GC finish");
-    while (in_gc) {
-	verbose(3, "Waiting wakeup from GC");
-	pthread_cond_wait(&mjit_gc_wakeup, &mjit_engine_mutex);
-    }
-    in_jit = TRUE;
-    CRITICAL_SECTION_FINISH(3, "before mjit_compile to wait GC finish");
-
-    verbose(2, "compile: %s@%s:%d -> %s", RSTRING_PTR(unit->iseq->body->location.label),
-	    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
-    success = mjit_compile(f, unit->iseq->body, funcname);
-
-    /* release blocking mjit_gc_start_hook */
-    CRITICAL_SECTION_START(3, "after mjit_compile to wakeup client for GC");
-    in_jit = FALSE;
-    verbose(3, "Sending wakeup signal to client in a mjit-worker for GC");
-    if (pthread_cond_signal(&mjit_client_wakeup) != 0) {
-	fprintf(stderr, "Cannot send wakeup signal to client in mjit-worker\n");
-    }
-    CRITICAL_SECTION_FINISH(3, "in worker to wakeup client for GC");
-
-    fclose(f);
-    if (!success) {
-	if (!mjit_opts.save_temps)
-	    remove(c_file);
-	return (void *)NOT_COMPILABLE_JIT_ISEQ_FUNC;
-    }
-
-    compile_c_to_so(c_file, so_file);
-    if (!mjit_opts.save_temps)
-	remove(c_file);
-
-    func = load_func_from_so(so_file, funcname);
-    if (!mjit_opts.save_temps)
-	remove(so_file);
-
-    return func;
-}
-
 /* XXX_COMMONN_ARGS define the command line arguments of XXX C
    compiler used by MJIT.
 
@@ -481,7 +415,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
    header.  */
 static const char *GCC_COMMON_ARGS_DEBUG[] = {"gcc", "-O0", "-g", "-Wfatal-errors", "-fPIC", "-shared", "-w", "-pipe", "-nostartfiles", "-nodefaultlibs", "-nostdlib", NULL};
 static const char *GCC_COMMON_ARGS[] = {"gcc", "-O2", "-Wfatal-errors", "-fPIC", "-shared", "-w", "-pipe", "-nostartfiles", "-nodefaultlibs", "-nostdlib", NULL};
-/* static const char *GCC_USE_PCH_ARGS[] = {"-I/tmp", NULL}; */
+static const char *GCC_USE_PCH_ARGS[] = {"-I/tmp", NULL};
 static const char *GCC_EMIT_PCH_ARGS[] = {NULL};
 
 #ifdef __MACH__
@@ -496,7 +430,7 @@ static const char *LLVM_COMMON_ARGS[] = {"clang", "-O2", "-fPIC", "-shared", "-I
 
 #endif /* #if __MACH__ */
 
-/* static const char *LLVM_USE_PCH_ARGS[] = {"-include-pch", NULL, "-Wl,-undefined", "-Wl,dynamic_lookup", NULL}; */
+static const char *LLVM_USE_PCH_ARGS[] = {"-include-pch", NULL, "-Wl,-undefined", "-Wl,dynamic_lookup", NULL};
 static const char *LLVM_EMIT_PCH_ARGS[] = {"-emit-pch", NULL};
 
 /* Status of the the precompiled header creation.  The status is
@@ -546,6 +480,125 @@ make_pch()
 	fprintf(stderr, "Cannot send client wakeup signal in make_pch\n");
     }
     CRITICAL_SECTION_FINISH(3, "in make_pch");
+}
+
+/* Compile C file to so. It returns 1 if it succeeds. */
+static int
+compile_c_to_so(const char *c_file, const char *so_file)
+{
+    int exit_code;
+    static const char *input[] = {NULL, NULL};
+    static const char *output[] = {"-o",  NULL, NULL};
+    char **args;
+
+    input[0] = c_file;
+    output[1] = so_file;
+    if (mjit_opts.llvm) {
+	LLVM_USE_PCH_ARGS[1] = pch_file;
+	args = form_args(4, (mjit_opts.debug ? LLVM_COMMON_ARGS_DEBUG : LLVM_COMMON_ARGS),
+			 LLVM_USE_PCH_ARGS, input, output);
+    } else {
+	args = form_args(4, (mjit_opts.debug ? GCC_COMMON_ARGS_DEBUG : GCC_COMMON_ARGS),
+			 GCC_USE_PCH_ARGS, input, output);
+    }
+    if (args == NULL)
+	return FALSE;
+
+    exit_code = exec_process(cc_path, args);
+    xfree(args);
+
+    verbose(3, "compile exit_status: %d", exit_code);
+    return exit_code == 0;
+}
+
+static void *
+load_func_from_so(const char *so_file, const char *funcname, struct rb_mjit_unit *unit)
+{
+    void *handle, *func;
+
+    handle = dlopen(so_file, RTLD_NOW);
+    if (handle == NULL) {
+	if (mjit_opts.warnings || mjit_opts.verbose)
+	    fprintf(stderr, "MJIT warning: failure in loading code from '%s': %s\n", so_file, dlerror());
+	return (void *)NOT_ADDED_JIT_ISEQ_FUNC;
+    }
+
+    func = dlsym(handle, funcname);
+    /* TODO: dlclose(handle); on unloading or GCing ISeq */
+    unit->handle = handle;
+    return func;
+}
+
+/* Compile ISeq in UNIT and return function pointer of JIT-ed code.
+   It may return NOT_COMPILABLE_JIT_ISEQ_FUNC if something went wrong. */
+static void *
+convert_unit_to_func(struct rb_mjit_unit *unit)
+{
+    char c_file[70], so_file[70], funcname[35];
+    int success;
+    FILE *f;
+    void *func;
+
+    sprint_uniq_filename(c_file, unit->id, "_mjit", ".c");
+    sprint_uniq_filename(so_file, unit->id, "_mjit", ".so");
+    sprintf(funcname, "_mjit%d", unit->id);
+
+    f = fopen(c_file, "w");
+    if (!mjit_opts.llvm) { /* -include-pch is used for LLVM */
+	const char *s;
+	fprintf(f, "#include \"");
+	/* print pch_file except .gch */
+	for (s = pch_file; strcmp(s, ".gch") != 0; s++)
+	    fprintf(f, "%c", *s);
+	fprintf(f, "\"\n");
+    }
+
+    /* wait until mjit_gc_finish_hook is called */
+    CRITICAL_SECTION_START(3, "before mjit_compile to wait GC finish");
+    while (in_gc) {
+	verbose(3, "Waiting wakeup from GC");
+	pthread_cond_wait(&mjit_gc_wakeup, &mjit_engine_mutex);
+    }
+    in_jit = TRUE;
+    CRITICAL_SECTION_FINISH(3, "before mjit_compile to wait GC finish");
+
+    verbose(2, "start compile: %s@%s:%d -> %s", RSTRING_PTR(unit->iseq->body->location.label),
+	    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
+    success = mjit_compile(f, unit->iseq->body, funcname);
+
+    /* release blocking mjit_gc_start_hook */
+    CRITICAL_SECTION_START(3, "after mjit_compile to wakeup client for GC");
+    in_jit = FALSE;
+    verbose(3, "Sending wakeup signal to client in a mjit-worker for GC");
+    if (pthread_cond_signal(&mjit_client_wakeup) != 0) {
+	fprintf(stderr, "Cannot send wakeup signal to client in mjit-worker\n");
+    }
+    CRITICAL_SECTION_FINISH(3, "in worker to wakeup client for GC");
+
+    fclose(f);
+    if (!success) {
+	if (!mjit_opts.save_temps)
+	    remove(c_file);
+	return (void *)NOT_COMPILABLE_JIT_ISEQ_FUNC;
+    }
+
+    success = compile_c_to_so(c_file, so_file);
+    if (!mjit_opts.save_temps)
+	remove(c_file);
+    if (!success) {
+	verbose(2, "Failed to load so: %s", so_file);
+	return (void *)NOT_COMPILABLE_JIT_ISEQ_FUNC;
+    }
+
+    func = load_func_from_so(so_file, funcname, unit);
+    if (!mjit_opts.save_temps)
+	remove(so_file);
+
+    if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
+	verbose(2, "JIT SUCCESS!: %s@%s:%d", RSTRING_PTR(unit->iseq->body->location.label),
+		RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno));
+    }
+    return func;
 }
 
 /* Set to TRUE to finish worker.  */
@@ -641,7 +694,10 @@ mjit_add_iseq_to_process(const rb_iseq_t *iseq)
     CRITICAL_SECTION_START(3, "in add_iseq_to_process");
     add_to_unit_queue(unit);
     /* TODO: Unload some units if it's >= max_cache_size */
-    /* TODO: wakeup worker */
+    verbose(3, "Sending wakeup signal to workers in mjit_add_iseq_to_process");
+    if (pthread_cond_broadcast(&mjit_worker_wakeup) != 0) {
+	fprintf(stderr, "Cannot send wakeup signal to workers in add_iseq_to_process\n");
+    }
     CRITICAL_SECTION_FINISH(3, "in add_iseq_to_process");
 }
 
