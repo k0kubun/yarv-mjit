@@ -18,8 +18,6 @@
 #include "ruby/config.h"
 #include "debug_counter.h"
 
-#ifndef MJIT_HEADER
-
 /* control stack frame */
 
 static rb_control_frame_t *vm_get_ruby_level_caller_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp);
@@ -69,7 +67,6 @@ rb_threadptr_stack_overflow(rb_thread_t *th, int crit)
     threadptr_stack_overflow(th, FALSE);
 #endif
 }
-
 
 #if VM_CHECK_MODE > 0
 static int
@@ -286,8 +283,6 @@ rb_vm_push_frame(rb_execution_context_t *ec,
     return vm_push_frame_(ec, iseq, type, self, specval, cref_or_me, pc, sp, local_size, stack_max);
 }
 
-#endif /* #ifndef MJIT_HEADER */
-
 /* return TRUE if the frame is finished */
 static inline int
 vm_pop_frame(rb_thread_t *th, rb_control_frame_t *cfp, const VALUE *ep)
@@ -301,8 +296,6 @@ vm_pop_frame(rb_thread_t *th, rb_control_frame_t *cfp, const VALUE *ep)
 
     return flags & VM_FRAME_FLAG_FINISH;
 }
-
-#ifndef MJIT_HEADER
 
 void
 rb_vm_pop_frame(rb_thread_t *th)
@@ -326,6 +319,8 @@ rb_arity_error_new(int argc, int min, int max)
     }
     return rb_exc_new3(rb_eArgError, err_mess);
 }
+
+#ifndef MJIT_HEADER
 
 void
 rb_error_arity(int argc, int min, int max)
@@ -531,6 +526,8 @@ vm_getspecial(rb_thread_t *th, const VALUE *lep, rb_num_t key, rb_num_t type)
     return val;
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 PUREFUNC(static rb_callable_method_entry_t *check_method_entry(VALUE obj, int can_be_svar));
 static rb_callable_method_entry_t *
 check_method_entry(VALUE obj, int can_be_svar)
@@ -704,7 +701,6 @@ vm_cref_replace_with_duplicated_cref(const VALUE *ep)
     }
 }
 
-
 static rb_cref_t *
 rb_vm_get_cref(const VALUE *ep)
 {
@@ -717,6 +713,8 @@ rb_vm_get_cref(const VALUE *ep)
 	rb_bug("rb_vm_get_cref: unreachable");
     }
 }
+
+#ifndef MJIT_HEADER
 
 static const rb_cref_t *
 vm_get_const_key_cref(const VALUE *ep)
@@ -946,6 +944,8 @@ vm_search_const_defined_class(const VALUE cbase, ID id)
     return 0;
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 #ifndef USE_IC_FOR_IVAR
 #define USE_IC_FOR_IVAR 1
 #endif
@@ -1053,6 +1053,8 @@ vm_setivar(VALUE obj, ID id, VALUE val, IC ic, struct rb_call_cache *cc, int is_
     RB_DEBUG_COUNTER_INC(ivar_set_ic_miss);
     return rb_ivar_set(obj, id, val);
 }
+
+#ifndef MJIT_HEADER
 
 static inline VALUE
 vm_getinstancevariable(VALUE obj, ID id, IC ic)
@@ -1317,6 +1319,8 @@ vm_expandarray(rb_control_frame_t *cfp, VALUE ary, rb_num_t num, int flag)
     RB_GC_GUARD(ary);
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static VALUE vm_call_general(rb_thread_t *th, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc);
 
 static void
@@ -1344,6 +1348,8 @@ vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE 
     cc->class_serial = RCLASS_SERIAL(klass);
 #endif
 }
+
+#ifndef MJIT_HEADER
 
 static inline int
 check_cfunc(const rb_callable_method_entry_t *me, VALUE (*func)())
@@ -1572,6 +1578,8 @@ vm_base_ptr(const rb_control_frame_t *cfp)
     }
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 /* method call processes with call_info */
 
 #include "vm_args.c"
@@ -1586,9 +1594,9 @@ static inline VALUE vm_call_method(rb_thread_t *th, rb_control_frame_t *cfp, str
 
 static vm_call_handler vm_call_iseq_setup_func(const struct rb_call_info *ci, const int param_size, const int local_size);
 
-static rb_method_definition_t *method_definition_create(rb_method_type_t type, ID mid);
-static void method_definition_set(const rb_method_entry_t *me, rb_method_definition_t *def, void *opts);
-static int rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_definition_t *d2);
+extern rb_method_definition_t *method_definition_create(rb_method_type_t type, ID mid);
+extern void method_definition_set(const rb_method_entry_t *me, rb_method_definition_t *def, void *opts);
+extern int rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_definition_t *d2);
 
 static const rb_iseq_t *
 def_iseq_ptr(rb_method_definition_t *def)
@@ -1738,6 +1746,8 @@ vm_call_iseq_setup_tailcall(rb_thread_t *th, rb_control_frame_t *cfp, struct rb_
     return Qundef;
 }
 
+#ifndef MJIT_HEADER
+
 static VALUE
 call_cfunc_m2(VALUE (*func)(ANYARGS), VALUE recv, int argc, const VALUE *argv)
 {
@@ -1845,6 +1855,8 @@ call_cfunc_15(VALUE (*func)(ANYARGS), VALUE recv, int argc, const VALUE *argv)
 {
     return (*func)(recv, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7], argv[8], argv[9], argv[10], argv[11], argv[12], argv[13], argv[14]);
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 #ifndef VM_PROFILE
 #define VM_PROFILE 0
@@ -2431,6 +2443,8 @@ vm_call_super_method(rb_thread_t *th, rb_control_frame_t *reg_cfp, struct rb_cal
     return vm_call_method(th, reg_cfp, calling, ci, cc);
 }
 
+#ifndef MJIT_HEADER
+
 /* super */
 
 static inline VALUE
@@ -2502,6 +2516,8 @@ vm_search_super_method(rb_thread_t *th, rb_control_frame_t *reg_cfp,
 	CI_SET_FASTPATH(cc, vm_call_super_method, 1);
     }
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 /* yield */
 
@@ -2667,6 +2683,8 @@ vm_yield_setup_args(rb_thread_t *th, const rb_iseq_t *iseq, const int argc, VALU
 
     return vm_callee_setup_block_arg(th, calling, ci, iseq, argv, arg_setup_type);
 }
+
+#ifndef MJIT_HEADER
 
 /* ruby iseq -> ruby block */
 
@@ -2950,6 +2968,8 @@ vm_defined(rb_thread_t *th, rb_control_frame_t *reg_cfp, rb_num_t op_type, VALUE
     }
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static const VALUE *
 vm_get_ep(const VALUE *const reg_ep, rb_num_t lv)
 {
@@ -2960,6 +2980,8 @@ vm_get_ep(const VALUE *const reg_ep, rb_num_t lv)
     }
     return ep;
 }
+
+#ifndef MJIT_HEADER
 
 static VALUE
 vm_get_special_object(const VALUE *const reg_ep,

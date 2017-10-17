@@ -10202,7 +10202,7 @@ sym_to_sym(VALUE sym)
     return sym;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_sym_proc_call(ID mid, int argc, const VALUE *argv, VALUE passed_proc)
 {
     VALUE obj;

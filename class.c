@@ -1773,7 +1773,7 @@ rb_define_attr(VALUE klass, const char *name, int read, int write)
     rb_attr(klass, rb_intern(name), read, write, FALSE);
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_keyword_error_new(const char *error, VALUE keys)
 {
     const VALUE *ptr = RARRAY_CONST_PTR(keys);

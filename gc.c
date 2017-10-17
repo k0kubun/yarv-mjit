@@ -4038,7 +4038,7 @@ stack_check(rb_thread_t *th, int water_mark)
 
 #define STACKFRAME_FOR_CALL_CFUNC 838
 
-int
+RUBY_FUNC_EXPORTED int
 rb_threadptr_stack_check(rb_thread_t *th)
 {
     return stack_check(th, STACKFRAME_FOR_CALL_CFUNC);
