@@ -510,7 +510,7 @@ bt_iter_cfunc(void *ptr, const rb_control_frame_t *cfp, ID mid)
     loc->body.cfunc.prev_loc = arg->prev_loc;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_ec_backtrace_object(const rb_execution_context_t *ec)
 {
     struct bt_iter_arg arg;

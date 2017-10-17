@@ -16,7 +16,6 @@
 #include "vm_core.h"
 #include "iseq.h"
 #include "eval_intern.h"
-#ifndef MJIT_HEADER
 #include "probes.h"
 #include "probes_helper.h"
 
@@ -168,6 +167,8 @@ VM_BH_FROM_CFP_P(VALUE block_handler, const rb_control_frame_t *cfp)
     return VM_TAGGED_PTR_REF(block_handler, 0x03) == captured;
 }
 
+#ifndef MJIT_HEADER
+
 static VALUE
 vm_passed_block_handler(rb_execution_context_t *ec)
 {
@@ -296,7 +297,6 @@ static VALUE vm_make_env_object(const rb_execution_context_t *ec, rb_control_fra
 static VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 static VALUE vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 
-
 #endif /* #ifndef MJIT_HEADER */
 
 #include "mjit.h"
@@ -309,7 +309,9 @@ static VALUE vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE s
 #include "vm_exec.c"
 
 #include "vm_method.c"
+#endif /* #ifndef MJIT_HEADER */
 #include "vm_eval.c"
+#ifndef MJIT_HEADER
 
 #define PROCDEBUG 0
 
@@ -873,7 +875,7 @@ rb_proc_create(VALUE klass, const struct rb_block *block,
     return procval;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_vm_make_proc(const rb_execution_context_t *ec, const struct rb_captured_block *captured, VALUE klass)
 {
     return rb_vm_make_proc_lambda(ec, captured, klass, FALSE);
@@ -974,6 +976,8 @@ rb_binding_add_dynavars(VALUE bindval, rb_binding_t *bind, int dyncount, const I
     env = (const rb_env_t *)envval;
     return env->env;
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 /* C -> Ruby: block */
 
@@ -1192,6 +1196,8 @@ rb_vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc,
 	return vm_invoke_proc(ec, proc, self, argc, argv, passed_block_handler);
     }
 }
+
+#ifndef MJIT_HEADER
 
 /* special variable */
 
@@ -1789,7 +1795,7 @@ hook_before_rewind(rb_execution_context_t *ec, const rb_control_frame_t *cfp, in
   };
  */
 
-static VALUE
+RUBY_FUNC_EXPORTED VALUE
 vm_exec(rb_execution_context_t *ec)
 {
     enum ruby_tag_type state;
@@ -3404,6 +3410,6 @@ vm_collect_usage_register(int reg, int isset)
 }
 #endif
 
-#include "vm_call_iseq_optimized.inc" /* required from vm_insnhelper.c */
-
 #endif /* #ifndef MJIT_HEADER */
+
+#include "vm_call_iseq_optimized.inc" /* required from vm_insnhelper.c */

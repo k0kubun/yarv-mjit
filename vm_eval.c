@@ -11,6 +11,8 @@
 
 **********************************************************************/
 
+#ifndef MJIT_HEADER
+
 struct local_var_list {
     VALUE tbl;
 };
@@ -20,7 +22,7 @@ static inline VALUE vm_yield_with_cref(rb_execution_context_t *ec, int argc, con
 static inline VALUE vm_yield(rb_execution_context_t *ec, int argc, const VALUE *argv);
 static inline VALUE vm_yield_with_block(rb_execution_context_t *ec, int argc, const VALUE *argv, VALUE block_handler);
 static inline VALUE vm_yield_force_blockarg(rb_execution_context_t *ec, VALUE args);
-static VALUE vm_exec(rb_execution_context_t *ec);
+VALUE vm_exec(rb_execution_context_t *ec);
 static void vm_set_eval_stack(rb_execution_context_t * th, const rb_iseq_t *iseq, const rb_cref_t *cref, const struct rb_block *base_block);
 static int vm_collect_local_variables_in_heap(const VALUE *dfp, const struct local_var_list *vars);
 
@@ -252,6 +254,8 @@ rb_current_receiver(void)
     return cfp->self;
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static inline void
 stack_check(rb_execution_context_t *ec)
 {
@@ -263,6 +267,8 @@ stack_check(rb_execution_context_t *ec)
 	rb_ec_stack_overflow(th->ec, FALSE);
     }
 }
+
+#ifndef MJIT_HEADER
 
 static inline const rb_callable_method_entry_t *rb_search_method_entry(VALUE recv, ID mid);
 static inline enum method_missing_reason rb_method_call_status(rb_execution_context_t *ec, const rb_callable_method_entry_t *me, call_type scope, VALUE self);
@@ -635,7 +641,7 @@ rb_method_missing(int argc, const VALUE *argv, VALUE obj)
     UNREACHABLE;
 }
 
-static VALUE
+RUBY_FUNC_EXPORTED VALUE
 make_no_method_exception(VALUE exc, VALUE format, VALUE obj,
 			 int argc, const VALUE *argv, int priv)
 {
@@ -734,7 +740,7 @@ method_missing(VALUE obj, ID id, int argc, const VALUE *argv, enum method_missin
     return result;
 }
 
-void
+RUBY_FUNC_EXPORTED void
 rb_raise_method_missing(rb_execution_context_t *ec, int argc, const VALUE *argv,
 			VALUE obj, int call_status)
 {
@@ -2202,3 +2208,5 @@ Init_vm_eval(void)
     id_tag = rb_intern_const("tag");
     id_value = rb_intern_const("value");
 }
+
+#endif /* #ifndef MJIT_HEADER */
