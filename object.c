@@ -303,7 +303,7 @@ rb_obj_singleton_class(VALUE obj)
 }
 
 /*! \private */
-void
+RUBY_FUNC_EXPORTED void
 rb_obj_copy_ivar(VALUE dest, VALUE obj)
 {
     if (!(RBASIC(dest)->flags & ROBJECT_EMBED) && ROBJECT_IVPTR(dest)) {

@@ -1204,7 +1204,7 @@ rb_hash_proc(st_index_t hash, VALUE prc)
     return rb_hash_uint(hash, (st_index_t)proc->block.as.captured.ep >> 16);
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_sym_to_proc(VALUE sym)
 {
     static VALUE sym_proc_cache = Qfalse;
