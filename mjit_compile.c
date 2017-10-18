@@ -147,7 +147,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprint_getlocal(f, b->stack_size++, operands[0], 1);
         break;
       default:
-	if (mjit_opts.warnings || mjit_opts.verbose)
+	if (mjit_opts.warnings || mjit_opts.verbose >= 3)
 	    /* passing excessive arguments to suppress warning in insns_info.inc as workaround... */
 	    fprintf(stderr, "MJIT warning: Failed to compile instruction: %s (%s: %d...)\n",
 		    insn_name(insn), insn_op_types(insn), insn_len(insn) > 0 ? insn_op_type(insn, 0) : 0);

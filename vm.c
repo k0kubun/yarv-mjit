@@ -9,15 +9,19 @@
 **********************************************************************/
 
 #include "internal.h"
+#ifndef MJIT_HEADER
 #include "ruby/vm.h"
 #include "ruby/st.h"
 
 #include "gc.h"
+#endif /* #ifndef MJIT_HEADER */
 #include "vm_core.h"
 #include "iseq.h"
 #include "eval_intern.h"
+#ifndef MJIT_HEADER
 #include "probes.h"
 #include "probes_helper.h"
+#endif /* #ifndef MJIT_HEADER */
 
 VALUE rb_str_concat_literals(size_t, const VALUE*);
 
@@ -51,11 +55,15 @@ rb_vm_search_cf_from_ep(const rb_execution_context_t *ec, const rb_control_frame
     }
 }
 
+#ifndef MJIT_HEADER
+
 const VALUE *
 rb_vm_ep_local_ep(const VALUE *ep)
 {
     return VM_EP_LEP(ep);
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 PUREFUNC(static inline const VALUE *VM_CF_LEP(const rb_control_frame_t * const cfp));
 static inline const VALUE *
@@ -77,6 +85,8 @@ VM_CF_BLOCK_HANDLER(const rb_control_frame_t * const cfp)
     const VALUE *ep = VM_CF_LEP(cfp);
     return VM_ENV_BLOCK_HANDLER(ep);
 }
+
+#ifndef MJIT_HEADER
 
 VALUE
 rb_vm_frame_block_handler(const rb_control_frame_t *cfp)
@@ -143,6 +153,8 @@ rb_vm_ep_in_heap_p(const VALUE *ep)
     return vm_ep_in_heap_p_(ec, ep);
 }
 #endif
+
+#endif /* #ifndef MJIT_HEADER */
 
 static struct rb_captured_block *
 VM_CFP_TO_CAPTURED_BLOCK(const rb_control_frame_t *cfp)
@@ -294,7 +306,7 @@ static void vm_collect_usage_register(int reg, int isset);
 #endif
 
 static VALUE vm_make_env_object(const rb_execution_context_t *ec, rb_control_frame_t *cfp);
-static VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
+extern VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 static VALUE vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 
 #endif /* #ifndef MJIT_HEADER */
@@ -977,8 +989,6 @@ rb_binding_add_dynavars(VALUE bindval, rb_binding_t *bind, int dyncount, const I
     return env->env;
 }
 
-#endif /* #ifndef MJIT_HEADER */
-
 /* C -> Ruby: block */
 
 static inline VALUE
@@ -1175,14 +1185,14 @@ vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self,
     return val;
 }
 
-static VALUE
+RUBY_FUNC_EXPORTED VALUE
 vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self,
 		  int argc, const VALUE *argv, VALUE block_handler)
 {
     return invoke_block_from_c_proc(ec, proc, self, argc, argv, block_handler, TRUE);
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc,
 		  int argc, const VALUE *argv, VALUE passed_block_handler)
 {
@@ -1196,8 +1206,6 @@ rb_vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc,
 	return vm_invoke_proc(ec, proc, self, argc, argv, passed_block_handler);
     }
 }
-
-#ifndef MJIT_HEADER
 
 /* special variable */
 
