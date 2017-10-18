@@ -60,7 +60,7 @@ fprint_call_method(FILE *f, VALUE ci, VALUE cc, unsigned int result_pos)
 {
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc, ci, cc);
-    fprintf(f, "      if (v == Qundef) {\n"); /* TODO: also call jit_exec */
+    fprintf(f, "      if (v == Qundef && (v = mjit_exec(th)) == Qundef) {\n"); /* TODO: also call jit_exec */
     fprintf(f, "        VM_ENV_FLAGS_SET(th->ec.cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
     fprintf(f, "        stack[%d] = vm_exec(th);\n", result_pos);
     fprintf(f, "      } else {\n");
