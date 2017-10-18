@@ -400,6 +400,55 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "  EXEC_EVENT_HOOK(th, (rb_event_flag_t)0x%"PRIxVALUE", cfp->self, 0, 0, 0, Qundef);\n", operands[0]);
 	}
         break;
+      case YARVINSN_trace2:
+	fprintf(f, "  vm_dtrace((rb_event_flag_t)0x%"PRIxVALUE", th);\n", operands[0]);
+	fprintf(f, "  EXEC_EVENT_HOOK(th, (rb_event_flag_t)0x%"PRIxVALUE", cfp->self, 0, 0, 0, 0x%"PRIxVALUE");\n", operands[0], operands[1]);
+        break;
+      /* case YARVINSN_defineclass:
+        break; */
+      case YARVINSN_send:
+	{
+	    CALL_INFO ci = (CALL_INFO)operands[0];
+	    unsigned int push_count = ci->orig_argc + ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+
+	    fprintf(f, "  {\n");
+	    fprintf(f, "    struct rb_calling_info calling;\n");
+
+	    fprint_args(f, push_count + 1, b->stack_size - push_count - 1);
+	    fprintf(f, "    vm_caller_setup_arg_block(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
+	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
+	    fprintf(f, "    vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = stack[%d]);\n", operands[0], operands[1], b->stack_size - 1 - push_count);
+	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1);
+	    fprintf(f, "  }\n");
+	    b->stack_size -= push_count;
+	}
+        break;
+      case YARVINSN_opt_str_freeze:
+	fprintf(f, "  if (BASIC_OP_UNREDEFINED_P(BOP_FREEZE, STRING_REDEFINED_OP_FLAG)) {\n");
+	fprintf(f, "    stack[%d] = 0x%"PRIxVALUE";\n", b->stack_size, operands[0]);
+	fprintf(f, "  } else {\n");
+	fprintf(f, "    stack[%d] = rb_funcall(rb_str_resurrect(0x%"PRIxVALUE"), idFreeze, 0);\n", b->stack_size, operands[0]);
+	fprintf(f, "  }\n");
+	b->stack_size++;
+        break;
+      case YARVINSN_opt_str_uminus:
+	fprintf(f, "  if (BASIC_OP_UNREDEFINED_P(BOP_UMINUS, STRING_REDEFINED_OP_FLAG)) {\n");
+	fprintf(f, "    stack[%d] = 0x%"PRIxVALUE";\n", b->stack_size, operands[0]);
+	fprintf(f, "  } else {\n");
+	fprintf(f, "    stack[%d] = rb_funcall(rb_str_resurrect(0x%"PRIxVALUE"), idUMinus, 0);\n", b->stack_size, operands[0]);
+	fprintf(f, "  }\n");
+	b->stack_size++;
+        break;
+      case YARVINSN_opt_newarray_max:
+	fprintf(f, "  stack[%d] = vm_opt_newarray_max(0x%"PRIxVALUE", stack + %d);\n",
+		b->stack_size - (unsigned int)operands[0], operands[0], b->stack_size - (unsigned int)operands[0]);
+	b->stack_size += 1 - (unsigned int)operands[0];
+        break;
+      case YARVINSN_opt_newarray_min:
+	fprintf(f, "  stack[%d] = vm_opt_newarray_min(0x%"PRIxVALUE", stack + %d);\n",
+		b->stack_size - (unsigned int)operands[0], operands[0], b->stack_size - (unsigned int)operands[0]);
+	b->stack_size += 1 - (unsigned int)operands[0];
+        break;
       case YARVINSN_opt_send_without_block:
 	{
 	    CALL_INFO ci = (CALL_INFO)operands[0];
@@ -413,6 +462,42 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprint_call_method(f, operands[0], operands[1], b->stack_size - ci->orig_argc - 1);
 	    fprintf(f, "  }\n");
 	    b->stack_size -= ci->orig_argc;
+	}
+        break;
+      case YARVINSN_invokesuper:
+	{
+	    CALL_INFO ci = (CALL_INFO)operands[0];
+	    unsigned int push_count = ci->orig_argc + ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+
+	    fprintf(f, "  {\n");
+	    fprintf(f, "    struct rb_calling_info calling;\n");
+	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
+	    fprint_args(f, push_count + 1, b->stack_size - push_count - 1);
+	    fprintf(f, "    vm_caller_setup_arg_block(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", TRUE);\n", operands[0], operands[2]);
+	    fprintf(f, "    calling.recv = cfp->self;\n");
+	    fprintf(f, "    vm_search_super_method(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", operands[0], operands[1]);
+	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1);
+	    fprintf(f, "  }\n");
+	    b->stack_size -= push_count;
+	}
+        break;
+      case YARVINSN_invokeblock:
+	{
+	    CALL_INFO ci = (CALL_INFO)operands[0];
+	    fprintf(f, "  {\n");
+	    fprintf(f, "    struct rb_calling_info calling;\n");
+	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
+	    fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
+	    fprintf(f, "    calling.recv = cfp->self;\n");
+
+	    fprint_args(f, ci->orig_argc, b->stack_size - ci->orig_argc);
+	    fprintf(f, "    stack[%d] = vm_invoke_block(th, cfp, &calling, 0x%"PRIxVALUE");\n", b->stack_size - ci->orig_argc, operands[0]);
+	    fprintf(f, "    if (stack[%d] == Qundef) {\n", b->stack_size - ci->orig_argc);
+	    fprintf(f, "      VM_ENV_FLAGS_SET(th->ec.cfp->ep, VM_FRAME_FLAG_FINISH);\n");
+	    fprintf(f, "      stack[%d] = vm_exec(th);\n", b->stack_size - ci->orig_argc);
+	    fprintf(f, "    }\n");
+	    fprintf(f, "  }\n");
+	    b->stack_size += 1 - ci->orig_argc;
 	}
         break;
       case YARVINSN_leave:
@@ -435,6 +520,11 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 #endif
 	/* stop compilation in this branch. to simulate stack properly,
 	   remaining insns should be compiled from another branch */
+	b->finish_p = TRUE;
+	break;
+      case YARVINSN_throw:
+	fprintf(f, "  RUBY_VM_CHECK_INTS(th);\n");
+	fprintf(f, "  THROW_EXCEPTION(vm_throw(th, cfp, 0x%"PRIxVALUE", stack[%d]));\n", operands[0], --b->stack_size);
 	b->finish_p = TRUE;
 	break;
       case YARVINSN_jump:
