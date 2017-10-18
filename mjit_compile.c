@@ -208,18 +208,10 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
         fprintf(f, "  lep_svar_set(th, VM_EP_LEP(cfp->ep), 0x%"PRIxVALUE", stack[%d]);\n", operands[0], --b->stack_size);
         break;
       case YARVINSN_getinstancevariable:
-	{
-	    //IC ic = (IC)operands[1];
-	    //fprintf(f, "  stack[%d] = jit_getivar(cfp->self, %llu, 0x%"PRIxVALUE");\n", b->stack_size++, ic->ic_serial, ic->ic_value.index);
-	    fprintf(f, "  stack[%d] = vm_getinstancevariable(cfp->self, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", b->stack_size++, operands[0], operands[1]);
-	}
+	fprintf(f, "  stack[%d] = vm_getinstancevariable(cfp->self, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", b->stack_size++, operands[0], operands[1]);
         break;
       case YARVINSN_setinstancevariable:
-	{
-	    //IC ic = (IC)operands[1];
-	    //fprintf(f, "  jit_setivar(cfp->self, %llu, 0x%"PRIxVALUE", stack[%d]);\n", ic->ic_serial, ic->ic_value.index, --b->stack_size);
-	    fprintf(f, "  vm_setinstancevariable(cfp->self, 0x%"PRIxVALUE", stack[%d], 0x%"PRIxVALUE");\n", operands[0], --b->stack_size, operands[1]);
-	}
+	fprintf(f, "  vm_setinstancevariable(cfp->self, 0x%"PRIxVALUE", stack[%d], 0x%"PRIxVALUE");\n", operands[0], --b->stack_size, operands[1]);
         break;
       case YARVINSN_getclassvariable:
 	fprintf(f, "  stack[%d] = rb_cvar_get(vm_get_cvar_base(rb_vm_get_cref(cfp->ep), cfp), 0x%"PRIxVALUE");\n", b->stack_size++, operands[0]);
