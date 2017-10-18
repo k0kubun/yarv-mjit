@@ -70,6 +70,7 @@
    WNOHANG waitpid would be very complicated.  */
 
 #include <sys/wait.h>
+#include <sys/time.h>
 #include <dlfcn.h>
 #include "vm_core.h"
 #include "mjit.h"
@@ -123,6 +124,16 @@ static const char *cc_path;
 static char *header_file;
 /* Name of the precompiled header file.  */
 static char *pch_file;
+
+/* Return time in milliseconds as a double.  */
+static double
+real_ms_time()
+{
+    struct timeval  tv;
+
+    gettimeofday(&tv, NULL);
+    return tv.tv_usec / 1000.0 + tv.tv_sec * 1000.0;
+}
 
 /* Make and return copy of STR in the heap.  Return NULL in case of a
    failure.  */
@@ -228,7 +239,7 @@ start_process(const char *path, char *const argv[])
 	fprintf(stderr, "\n");
     }
     if ((pid = vfork()) == 0) {
-	if (mjit_opts.verbose) {
+	if (mjit_opts.verbose == 0) {
 	    /* CC can be started in a thread using a file which has been
 	       already removed while MJIT is finishing.  Discard the
 	       messages about missing files.  */
@@ -538,6 +549,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     int success;
     FILE *f;
     void *func;
+    double start_time, end_time;
 
     sprint_uniq_filename(c_file, unit->id, "_mjit", ".c");
     sprint_uniq_filename(so_file, unit->id, "_mjit", ".so");
@@ -582,7 +594,10 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 	return (void *)NOT_COMPILABLE_JIT_ISEQ_FUNC;
     }
 
+    start_time = real_ms_time();
     success = compile_c_to_so(c_file, so_file);
+    end_time = real_ms_time();
+
     if (!mjit_opts.save_temps)
 	remove(c_file);
     if (!success) {
@@ -595,7 +610,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 	remove(so_file);
 
     if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
-	verbose(2, "JIT SUCCESS!: %s@%s:%d", RSTRING_PTR(unit->iseq->body->location.label),
+	verbose(1, "JIT success (%.1fms): %s@%s:%d", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
 		RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno));
     }
     return func;
