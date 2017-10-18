@@ -1347,6 +1347,8 @@ vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE 
 #endif
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static inline int
 check_cfunc(const rb_callable_method_entry_t *me, VALUE (*func)())
 {
@@ -1425,6 +1427,8 @@ opt_eq_func(VALUE recv, VALUE obj, CALL_INFO ci, CALL_CACHE cc)
   fallback:
     return opt_equal_fallback(recv, obj, ci, cc);
 }
+
+#ifndef MJIT_HEADER
 
 static
 #ifndef NO_BIG_INLINE
@@ -3391,6 +3395,8 @@ vm_case_dispatch(CDHASH hash, OFFSET else_offset, VALUE key)
     return 0;
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 NORETURN(static void
 	 vm_stack_consistency_error(rb_thread_t *,
 				    const rb_control_frame_t *,
@@ -3788,5 +3794,3 @@ vm_opt_regexpmatch2(VALUE recv, VALUE obj)
 	return Qundef;
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
