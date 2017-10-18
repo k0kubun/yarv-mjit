@@ -10128,7 +10128,7 @@ rb_str_quote_unprintable(VALUE str)
     return str;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_id_quote_unprintable(ID id)
 {
     return rb_str_quote_unprintable(rb_id2str(id));
