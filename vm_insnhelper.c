@@ -1049,8 +1049,6 @@ vm_setinstancevariable(VALUE obj, ID id, VALUE val, IC ic)
     vm_setivar(obj, id, val, ic, 0, 0);
 }
 
-#ifndef MJIT_HEADER
-
 static VALUE
 vm_throw_continue(const rb_execution_context_t *ec, VALUE err)
 {
@@ -1302,6 +1300,8 @@ vm_expandarray(rb_control_frame_t *cfp, VALUE ary, rb_num_t num, int flag)
     RB_GC_GUARD(ary);
 }
 
+#ifndef MJIT_HEADER
+
 static VALUE vm_call_general(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc);
 
 RUBY_FUNC_EXPORTED void
@@ -1471,7 +1471,13 @@ rb_eql_opt(VALUE obj1, VALUE obj2)
     return opt_eql_func(obj1, obj2, &ci, &cc);
 }
 
+<<<<<<< 2020b879a6cc94fcc2041a7ecdfb41887434720a
 static VALUE vm_call0(rb_execution_context_t *ec, VALUE, ID, int, const VALUE*, const rb_callable_method_entry_t *);
+=======
+#endif /* #ifndef MJIT_HEADER */
+
+extern VALUE vm_call0(rb_thread_t*, VALUE, ID, int, const VALUE*, const rb_callable_method_entry_t *);
+>>>>>>> mjit_compile.c: compile stack instructions
 
 static VALUE
 check_match(rb_execution_context_t *ec, VALUE pattern, VALUE target, enum vm_check_match_type type)
@@ -1499,8 +1505,6 @@ check_match(rb_execution_context_t *ec, VALUE pattern, VALUE target, enum vm_che
 	rb_bug("check_match: unreachable");
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 #if defined(_MSC_VER) && _MSC_VER < 1300
 #define CHECK_CMP_NAN(a, b) if (isnan(a) || isnan(b)) return Qfalse;
@@ -2942,8 +2946,6 @@ vm_get_ep(const VALUE *const reg_ep, rb_num_t lv)
     return ep;
 }
 
-#ifndef MJIT_HEADER
-
 static VALUE
 vm_get_special_object(const VALUE *const reg_ep,
 		      enum vm_special_object_type type)
@@ -3043,8 +3045,6 @@ vm_check_keyword(lindex_t bits, lindex_t idx, const VALUE *ep)
 	return rb_hash_has_key(kw_bits, INT2FIX(idx));
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 static void
 vm_dtrace(rb_event_flag_t flag, rb_execution_context_t *ec)
