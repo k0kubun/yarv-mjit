@@ -313,6 +313,8 @@ rb_error_arity(int argc, int min, int max)
     rb_exc_raise(rb_arity_error_new(argc, min, max));
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 /* lvar */
 
 NOINLINE(static void vm_env_write_slowpath(const VALUE *ep, int index, VALUE v));
@@ -338,6 +340,8 @@ vm_env_write(const VALUE *ep, int index, VALUE v)
 	vm_env_write_slowpath(ep, index, v);
     }
 }
+
+#ifndef MJIT_HEADER
 
 VALUE
 rb_vm_bh_to_procval(const rb_execution_context_t *ec, VALUE block_handler)
@@ -693,8 +697,6 @@ rb_vm_get_cref(const VALUE *ep)
     }
 }
 
-#ifndef MJIT_HEADER
-
 static const rb_cref_t *
 vm_get_const_key_cref(const VALUE *ep)
 {
@@ -711,6 +713,8 @@ vm_get_const_key_cref(const VALUE *ep)
     /* does not include singleton class */
     return NULL;
 }
+
+#ifndef MJIT_HEADER
 
 void
 rb_vm_rewrite_cref(rb_cref_t *cref, VALUE old_klass, VALUE new_klass, rb_cref_t **new_cref_ptr)
@@ -730,6 +734,8 @@ rb_vm_rewrite_cref(rb_cref_t *cref, VALUE old_klass, VALUE new_klass, rb_cref_t 
     }
     *new_cref_ptr = NULL;
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 static rb_cref_t *
 vm_cref_push(const rb_execution_context_t *ec, VALUE klass, const VALUE *ep, int pushed_by_eval)
@@ -923,8 +929,6 @@ vm_search_const_defined_class(const VALUE cbase, ID id)
     return 0;
 }
 
-#endif /* #ifndef MJIT_HEADER */
-
 #ifndef USE_IC_FOR_IVAR
 #define USE_IC_FOR_IVAR 1
 #endif
@@ -1033,8 +1037,6 @@ vm_setivar(VALUE obj, ID id, VALUE val, IC ic, struct rb_call_cache *cc, int is_
     return rb_ivar_set(obj, id, val);
 }
 
-#ifndef MJIT_HEADER
-
 static inline VALUE
 vm_getinstancevariable(VALUE obj, ID id, IC ic)
 {
@@ -1046,6 +1048,8 @@ vm_setinstancevariable(VALUE obj, ID id, VALUE val, IC ic)
 {
     vm_setivar(obj, id, val, ic, 0, 0);
 }
+
+#ifndef MJIT_HEADER
 
 static VALUE
 vm_throw_continue(const rb_execution_context_t *ec, VALUE err)
@@ -1496,6 +1500,7 @@ check_match(rb_execution_context_t *ec, VALUE pattern, VALUE target, enum vm_che
     }
 }
 
+#endif /* #ifndef MJIT_HEADER */
 
 #if defined(_MSC_VER) && _MSC_VER < 1300
 #define CHECK_CMP_NAN(a, b) if (isnan(a) || isnan(b)) return Qfalse;
@@ -1556,8 +1561,6 @@ vm_base_ptr(const rb_control_frame_t *cfp)
 	return NULL;
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 /* method call processes with call_info */
 
@@ -3180,6 +3183,8 @@ vm_define_module(ID id, rb_num_t flags, VALUE cbase)
     }
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static VALUE
 vm_find_or_create_class_by_id(ID id,
 			      rb_num_t flags,
@@ -3287,6 +3292,8 @@ vm_ic_update(IC ic, VALUE val, const VALUE *reg_ep)
     ruby_vm_const_missing_count = 0;
 }
 
+#ifndef MJIT_HEADER
+
 static VALUE
 vm_once_dispatch(rb_execution_context_t *ec, ISEQ iseq, IC ic)
 {
@@ -3318,6 +3325,8 @@ vm_once_dispatch(rb_execution_context_t *ec, ISEQ iseq, IC ic)
 	goto again;
     }
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 static OFFSET
 vm_case_dispatch(CDHASH hash, OFFSET else_offset, VALUE key)
@@ -3353,8 +3362,6 @@ vm_case_dispatch(CDHASH hash, OFFSET else_offset, VALUE key)
     }
     return 0;
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 NORETURN(static void
 	 vm_stack_consistency_error(const rb_execution_context_t *ec,
