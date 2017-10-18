@@ -1198,7 +1198,7 @@ flodivmod(double x, double y, double *divp, double *modp)
  * An error will be raised if y == 0.
  */
 
-double
+RUBY_FUNC_EXPORTED double
 ruby_float_mod(double x, double y)
 {
     double mod;
