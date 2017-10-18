@@ -610,8 +610,11 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 	remove(so_file);
 
     if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
-	verbose(1, "JIT success (%.1fms): %s@%s:%d", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
-		RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno));
+	CRITICAL_SECTION_START(3, "end of jit");
+	if (unit->iseq)
+	    verbose(1, "JIT success (%.1fms): %s@%s:%d", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
+		    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno));
+	CRITICAL_SECTION_FINISH(3, "end of jit");
     }
     return func;
 }
