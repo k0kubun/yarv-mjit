@@ -1580,6 +1580,7 @@ VALUE rb_catch_protect(VALUE t, rb_block_call_func *func, VALUE data, enum ruby_
 
 RUBY_SYMBOL_EXPORT_BEGIN
 
+extern VALUE ruby_vm_const_missing_count;
 extern rb_thread_t *ruby_current_thread;
 extern rb_vm_t *ruby_current_vm;
 extern rb_event_flag_t ruby_vm_event_flags;
