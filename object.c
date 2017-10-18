@@ -197,7 +197,7 @@ rb_eql(VALUE obj1, VALUE obj2)
  * \private
  *++
  */
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_equal(VALUE obj1, VALUE obj2)
 {
     if (obj1 == obj2) return Qtrue;
@@ -216,7 +216,7 @@ VALUE rb_obj_hash(VALUE obj);
  *++
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_not(VALUE obj)
 {
     return RTEST(obj) ? Qfalse : Qtrue;
@@ -232,7 +232,7 @@ rb_obj_not(VALUE obj)
  *++
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_not_equal(VALUE obj1, VALUE obj2)
 {
     VALUE result = rb_funcall(obj1, id_eq, 1, obj2);

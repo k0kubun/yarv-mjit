@@ -69,6 +69,87 @@ fprint_call_method(FILE *f, VALUE ci, VALUE cc, unsigned int result_pos)
     fprintf(f, "    }\n");
 }
 
+static void
+fprint_opt_call_variables(FILE *f, unsigned int stack_size, unsigned int argc)
+{
+    fprintf(f, "    VALUE recv = stack[%d];\n", stack_size - argc);
+    if (argc >= 2) {
+	fprintf(f, "    VALUE obj = stack[%d];\n", stack_size - (argc - 1));
+    }
+    if (argc >= 3) {
+	fprintf(f, "    VALUE obj2 = stack[%d];\n", stack_size - (argc - 2));
+    }
+}
+
+static void
+fprint_opt_call_fallback(FILE *f, VALUE ci, VALUE cc, unsigned int stack_size, unsigned int argc, VALUE key)
+{
+    fprintf(f, "    if (stack[%d] == Qundef) {\n", stack_size - argc);
+    fprintf(f, "      struct rb_calling_info calling;\n");
+    fprintf(f, "      calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
+    fprintf(f, "      calling.argc = %d;\n", key ? argc : argc - 1);
+    fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = recv);\n", ci, cc);
+    fprintf(f, "      *(cfp->sp++) = recv;\n");
+    if (key) {
+	fprintf(f, "      *(cfp->sp++) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
+	if (argc >= 2) {
+	    fprintf(f, "      *(cfp->sp++) = obj;\n");
+	}
+    } else {
+	if (argc >= 2) {
+	    fprintf(f, "      *(cfp->sp++) = obj;\n");
+	}
+	if (argc >= 3) {
+	    fprintf(f, "      *(cfp->sp++) = obj2;\n");
+	}
+    }
+    fprint_call_method(f, ci, cc, stack_size - argc);
+    fprintf(f, "    }\n");
+}
+
+/* Print optimized call with redefinition fallback and return stack size change.
+   `format` should call function with `recv`, `obj` and `obj2` depending on `argc`. */
+PRINTF_ARGS(static int, 6, 7)
+fprint_opt_call(FILE *f, VALUE ci, VALUE cc, unsigned int stack_size, unsigned int argc, const char *format, ...)
+{
+    va_list va;
+
+    fprintf(f, "  {\n");
+    fprint_opt_call_variables(f, stack_size, argc);
+
+    fprintf(f, "    stack[%d] = ", stack_size - argc);
+    va_start(va, format);
+    vfprintf(f, format, va);
+    va_end(va);
+    fprintf(f, ";\n");
+
+    fprint_opt_call_fallback(f, ci, cc, stack_size, argc, (VALUE)0);
+    fprintf(f, "  }\n");
+
+    return 1 - argc;
+}
+
+/* Same as `fprint_opt_call`, but `key` will be `rb_str_resurrect`ed and pushed. */
+PRINTF_ARGS(static int, 7, 8)
+fprint_opt_call_with_key(FILE *f, VALUE ci, VALUE cc, VALUE key, unsigned int stack_size, unsigned int argc, const char *format, ...)
+{
+    va_list va;
+
+    fprintf(f, "  {\n");
+    fprint_opt_call_variables(f, stack_size, argc);
+
+    fprintf(f, "    stack[%d] = ", stack_size - argc);
+    va_start(va, format);
+    vfprintf(f, format, va);
+    va_end(va);
+    fprintf(f, ";\n");
+
+    fprint_opt_call_fallback(f, ci, cc, stack_size, argc, key);
+    fprintf(f, "  }\n");
+
+    return 1 - argc;
+}
+
 /* Compile one insn to F, may modify b->stack_size and return next position. */
 static unsigned int
 compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, const VALUE *operands,
@@ -134,6 +215,81 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	   remaining insns should be compiled from another branch */
 	b->finish_p = TRUE;
 	break;
+      case YARVINSN_opt_plus:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_plus(recv, obj)");
+        break;
+      case YARVINSN_opt_minus:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_minus(recv, obj)");
+        break;
+      case YARVINSN_opt_mult:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_mult(recv, obj)");
+        break;
+      case YARVINSN_opt_div:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_div(recv, obj)");
+        break;
+      case YARVINSN_opt_mod:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_mod(recv, obj)");
+        break;
+      case YARVINSN_opt_eq:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2,
+		"opt_eq_func(recv, obj, 0x%"PRIxVALUE", 0x%"PRIxVALUE")", operands[0], operands[1]);
+        break;
+      case YARVINSN_opt_neq:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2,
+		"vm_opt_neq(0x%"PRIxVALUE", 0x%"PRIxVALUE", 0x%"PRIxVALUE", 0x%"PRIxVALUE", recv, obj)",
+		operands[0], operands[1], operands[2], operands[3]);
+        break;
+      case YARVINSN_opt_lt:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_lt(recv, obj)");
+        break;
+      case YARVINSN_opt_le:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_le(recv, obj)");
+        break;
+      case YARVINSN_opt_gt:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_gt(recv, obj)");
+        break;
+      case YARVINSN_opt_ge:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_ge(recv, obj)");
+        break;
+      case YARVINSN_opt_ltlt:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_ltlt(recv, obj)");
+        break;
+      case YARVINSN_opt_aref:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_aref(recv, obj)");
+        break;
+      case YARVINSN_opt_aset:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 3, "vm_opt_aset(recv, obj, obj2)");
+        break;
+      case YARVINSN_opt_aset_with:
+	b->stack_size += fprint_opt_call_with_key(f, operands[0], operands[1], operands[2], b->stack_size, 2,
+		"vm_opt_aset_with(recv, 0x%"PRIxVALUE", obj)", operands[2]);
+        break;
+      case YARVINSN_opt_aref_with:
+	b->stack_size += fprint_opt_call_with_key(f, operands[0], operands[1], operands[2], b->stack_size, 1,
+		"vm_opt_aref_with(recv, 0x%"PRIxVALUE")", operands[2]);
+        break;
+      case YARVINSN_opt_length:
+	fprint_opt_call(f, operands[0], operands[1], b->stack_size, 1, "vm_opt_length(recv, BOP_LENGTH)");
+        break;
+      case YARVINSN_opt_size:
+	fprint_opt_call(f, operands[0], operands[1], b->stack_size, 1, "vm_opt_length(recv, BOP_SIZE)");
+        break;
+      case YARVINSN_opt_empty_p:
+	fprint_opt_call(f, operands[0], operands[1], b->stack_size, 1, "vm_opt_empty_p(recv)");
+        break;
+      case YARVINSN_opt_succ:
+	fprint_opt_call(f, operands[0], operands[1], b->stack_size, 1, "vm_opt_succ(recv)");
+        break;
+      case YARVINSN_opt_not:
+	fprint_opt_call(f, operands[0], operands[1], b->stack_size, 1,
+		"vm_opt_not(0x%"PRIxVALUE", 0x%"PRIxVALUE", recv)", operands[0], operands[1]);
+        break;
+      case YARVINSN_opt_regexpmatch1:
+	fprintf(f, "  stack[%d] = vm_opt_regexpmatch1((VALUE)0x%"PRIxVALUE", stack[%d]);\n", b->stack_size-1, operands[0], b->stack_size-1);
+        break;
+      case YARVINSN_opt_regexpmatch2:
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_regexpmatch2(recv, obj)");
+        break;
       case YARVINSN_bitblt:
 	fprintf(f, "  stack[%d] = rb_str_new2(\"a bit of bacon, lettuce and tomato\");\n", b->stack_size++);
         break;

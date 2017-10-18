@@ -1374,7 +1374,7 @@ num_equal(VALUE x, VALUE y)
  *  so an implementation-dependent value is returned.
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_float_equal(VALUE x, VALUE y)
 {
     volatile double a, b;
