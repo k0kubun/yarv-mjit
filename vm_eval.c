@@ -41,7 +41,7 @@ static VALUE send_internal(int argc, const VALUE *argv, VALUE recv, call_type sc
 
 static VALUE vm_call0_body(rb_thread_t* th, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc, const VALUE *argv);
 
-static VALUE
+RUBY_FUNC_EXPORTED VALUE
 vm_call0(rb_thread_t* th, VALUE recv, ID id, int argc, const VALUE *argv, const rb_callable_method_entry_t *me)
 {
     struct rb_calling_info calling_entry, *calling;
