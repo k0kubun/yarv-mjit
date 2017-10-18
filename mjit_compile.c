@@ -40,6 +40,17 @@ fprint_getlocal(FILE *f, unsigned int push_pos, lindex_t idx, rb_num_t level)
     }
 }
 
+static void
+fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
+{
+    /* COLLECT_USAGE_REGISTER_HELPER is necessary? */
+    fprintf(f, "  vm_env_write(vm_get_ep(cfp->ep, 0x%"PRIxVALUE"), -(int)0x%"PRIxVALUE", stack[%d]);\n", level, idx, pop_pos);
+    fprintf(f, "  RB_DEBUG_COUNTER_INC(lvar_set);\n");
+    if (level > 0) {
+	fprintf(f, "  RB_DEBUG_COUNTER_INC(lvar_set_dynamic);\n");
+    }
+}
+
 /* push back stack in local variable to YARV's stack pointer */
 static void
 fprint_args(FILE *f, unsigned int argc, unsigned int pos)
@@ -150,6 +161,26 @@ fprint_opt_call_with_key(FILE *f, VALUE ci, VALUE cc, VALUE key, unsigned int st
     return 1 - argc;
 }
 
+struct case_dispatch_var {
+    FILE *f;
+    unsigned int base_pos;
+};
+
+static int
+compile_case_dispatch_each(VALUE key, VALUE value, VALUE arg)
+{
+    struct case_dispatch_var *var = (struct case_dispatch_var *)arg;
+    unsigned int offset = FIX2INT(value);
+
+    fprintf(var->f, "    case %d:\n", offset);
+    fprintf(var->f, "      goto label_%d;\n", var->base_pos + offset);
+    fprintf(var->f, "      break;\n");
+    return ST_CONTINUE;
+}
+
+static void compile_insns(FILE *f, const struct rb_iseq_constant_body *body, unsigned int stack_size,
+	                  unsigned int pos, struct compile_status *status);
+
 /* Compile one insn to F, may modify b->stack_size and return next position. */
 static unsigned int
 compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, const VALUE *operands,
@@ -215,6 +246,65 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	   remaining insns should be compiled from another branch */
 	b->finish_p = TRUE;
 	break;
+      case YARVINSN_jump:
+	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
+	fprintf(f, "  RUBY_VM_CHECK_INTS(th);\n");
+	fprintf(f, "  goto label_%d;\n", next_pos);
+        break;
+      case YARVINSN_branchif:
+	fprintf(f, "  if (RTEST(stack[%d])) {\n", --b->stack_size);
+	fprintf(f, "    RUBY_VM_CHECK_INTS(th);\n");
+	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
+	fprintf(f, "  }\n");
+	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
+        break;
+      case YARVINSN_branchunless:
+	fprintf(f, "  if (!RTEST(stack[%d])) {\n", --b->stack_size);
+	fprintf(f, "    RUBY_VM_CHECK_INTS(th);\n");
+	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
+	fprintf(f, "  }\n");
+	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
+        break;
+      case YARVINSN_branchnil:
+	fprintf(f, "  if (NIL_P(stack[%d])) {\n", --b->stack_size);
+	fprintf(f, "    RUBY_VM_CHECK_INTS(th);\n");
+	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
+	fprintf(f, "  }\n");
+	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
+        break;
+      case YARVINSN_branchiftype:
+	fprintf(f, "  if (TYPE(stack[%d]) == (int)0x%"PRIxVALUE") {\n", --b->stack_size, operands[0]);
+	fprintf(f, "    RUBY_VM_CHECK_INTS(th);\n");
+	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[1]);
+	fprintf(f, "  }\n");
+        break;
+      case YARVINSN_getinlinecache:
+	fprintf(f, "  stack[%d] = vm_ic_hit_p(0x%"PRIxVALUE", cfp->ep);", b->stack_size, operands[1]);
+	fprintf(f, "  if (stack[%d] != Qnil) {\n", b->stack_size);
+	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
+	fprintf(f, "  }\n");
+	b->stack_size++;
+        break;
+      case YARVINSN_setinlinecache:
+	fprintf(f, "  vm_ic_update(0x%"PRIxVALUE", stack[%d], cfp->ep);\n", operands[0], b->stack_size-1);
+        break;
+      /*case YARVINSN_once:
+        fprintf(f, "  stack[%d] = vm_once_dispatch(0x%"PRIxVALUE", 0x%"PRIxVALUE", th);\n", b->stack_size++, operands[0], operands[1]);
+        break; */
+      case YARVINSN_opt_case_dispatch:
+	{
+	    struct case_dispatch_var arg;
+	    arg.f = f;
+	    arg.base_pos = pos + insn_len(insn);
+
+	    fprintf(f, "  switch (vm_case_dispatch(0x%"PRIxVALUE", 0x%"PRIxVALUE", stack[%d])) {\n", operands[0], operands[1], --b->stack_size);
+	    rb_hash_foreach(operands[0], compile_case_dispatch_each, (VALUE)&arg);
+	    fprintf(f, "  }\n");
+	}
+        break;
       case YARVINSN_opt_plus:
 	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_plus(recv, obj)");
         break;
@@ -302,6 +392,18 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case YARVINSN_getlocal_OP__WC__1:
 	fprint_getlocal(f, b->stack_size++, operands[0], 1);
         break;
+      case YARVINSN_setlocal_OP__WC__0:
+	fprint_setlocal(f, --b->stack_size, operands[0], 0);
+        break;
+      case YARVINSN_setlocal_OP__WC__1:
+	fprint_setlocal(f, --b->stack_size, operands[0], 1);
+        break;
+      case YARVINSN_putobject_OP_INT2FIX_O_0_C_:
+	fprintf(f, "  stack[%d] = INT2FIX(0);\n", b->stack_size++);
+        break;
+      case YARVINSN_putobject_OP_INT2FIX_O_1_C_:
+	fprintf(f, "  stack[%d] = INT2FIX(1);\n", b->stack_size++);
+        break;
       default:
 	if (mjit_opts.warnings || mjit_opts.verbose >= 3)
 	    /* passing excessive arguments to suppress warning in insns_info.inc as workaround... */
@@ -338,7 +440,7 @@ compile_insns(FILE *f, const struct rb_iseq_constant_body *body, unsigned int st
 #endif
 	status->compiled_for_pos[pos] = TRUE;
 
-	fprintf(f, "\nl%04d: /* %s */\n", pos, insn_name(insn));
+	fprintf(f, "\nlabel_%d: /* %s */\n", pos, insn_name(insn));
 	pos = compile_insn(f, body, insn, body->iseq_encoded + (pos+1), pos, status, &branch);
 	if (status->success && branch.stack_size > body->stack_max) {
 	    if (mjit_opts.warnings || mjit_opts.verbose)
