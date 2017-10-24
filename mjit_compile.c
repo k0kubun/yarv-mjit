@@ -208,7 +208,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case YARVINSN_getspecial:
 	fprintf(f, "  stack[%d] = vm_getspecial(th, VM_EP_LEP(cfp->ep), 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", b->stack_size++, operands[0], operands[1]);
         break;
-      case YARVINSN_setspecial: /* somehow SEGVs on test... */
+      case YARVINSN_setspecial:
         fprintf(f, "  lep_svar_set(th, VM_EP_LEP(cfp->ep), 0x%"PRIxVALUE", stack[%d]);\n", operands[0], --b->stack_size);
         break;
       case YARVINSN_getinstancevariable:
