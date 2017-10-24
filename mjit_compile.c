@@ -201,6 +201,10 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case YARVINSN_setlocal:
 	fprint_setlocal(f, --b->stack_size, operands[0], operands[1]);
         break;
+      /* case YARVINSN_getblockparam:
+	break;
+      case YARVINSN_setblockparam:
+	break; */
       case YARVINSN_getspecial:
 	fprintf(f, "  stack[%d] = vm_getspecial(th, VM_EP_LEP(cfp->ep), 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", b->stack_size++, operands[0], operands[1]);
         break;
