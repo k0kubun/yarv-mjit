@@ -576,6 +576,8 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 
     verbose(2, "start compile: %s@%s:%d -> %s", RSTRING_PTR(unit->iseq->body->location.label),
 	    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
+    fprintf(f, "/* %s@%s:%d */\n\n", RSTRING_PTR(unit->iseq->body->location.label),
+	    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno));
     success = mjit_compile(f, unit->iseq->body, funcname);
 
     /* release blocking mjit_gc_start_hook */
@@ -612,8 +614,8 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
 	CRITICAL_SECTION_START(3, "end of jit");
 	if (unit->iseq)
-	    verbose(1, "JIT success (%.1fms): %s@%s:%d", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
-		    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno));
+	    verbose(1, "JIT success (%.1fms): %s@%s:%d -> %s", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
+		    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
 	CRITICAL_SECTION_FINISH(3, "end of jit");
     }
     return func;
