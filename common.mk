@@ -186,7 +186,7 @@ SHOWFLAGS = showflags
 
 all: $(SHOWFLAGS) main docs
 
-main: $(SHOWFLAGS) exts $(ENCSTATIC:static=lib)encs rb_mjit_header-$(RUBY_PROGRAM_VERSION).h
+main: $(SHOWFLAGS) exts $(ENCSTATIC:static=lib)encs rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
 	@$(NULLCMD)
 
 .PHONY: showflags
@@ -296,7 +296,7 @@ ruby.imp: $(COMMONOBJS)
 
 install: install-rb-mjit-header install-$(INSTALLDOC)
 
-install-rb-mjit-header: rb_mjit_header-$(RUBY_PROGRAM_VERSION).h
+install-rb-mjit-header: rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
 	$(Q)$(INSTALL_DATA) $< $(arch_hdrdir)
 
 docs: $(DOCTARGETS)
@@ -569,7 +569,7 @@ distclean-rubyspec: distclean-spec
 realclean:: realclean-ext realclean-local realclean-enc realclean-golf realclean-extout
 realclean-local:: distclean-local
 	$(Q)$(RM) parse.c parse.h lex.c enc/trans/newline.c revision.h
-	$(Q)$(RM) id.c id.h probes.dmyh rb_mjit_header-$(RUBY_PROGRAM_VERSION).h
+	$(Q)$(RM) id.c id.h probes.dmyh rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) parse.c parse.h lex.c enc/trans/newline.c $(PRELUDES) revision.h
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) id.c id.h probes.dmyh
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) configure aclocal.m4 tool/config.guess tool/config.sub gems/*.gem
@@ -953,9 +953,14 @@ vm_call_iseq_optimized.inc: $(srcdir)/tool/mk_call_iseq_optimized.rb
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) $(srcdir)/tool/mk_call_iseq_optimized.rb > $@
 
-rb_mjit_header-$(RUBY_PROGRAM_VERSION).h: PHONY probes.h
+rb_mjit_header.h: PHONY probes.h
 	@$(ECHO) building $@
-	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER $(srcdir)/vm.c $(COUTFLAG) $@ -E -dD
+	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER $(srcdir)/vm.c $(COUTFLAG) $@.new -E -dD
+	@cmp $@.new $@ > /dev/null 2>&1 && echo $@ unchanged && rm $@.new && exit 0; mv $@.new $@
+
+rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h: rb_mjit_header.h $(srcdir)/tool/minimize_mjit_header.rb
+	@$(ECHO) building $@
+	$(BASERUBY) $(srcdir)/tool/minimize_mjit_header.rb $(CC) rb_mjit_header.h > $@.new && mv $@.new $@
 
 $(MINIPRELUDE_C): $(COMPILE_PRELUDE)
 	$(ECHO) generating $@
