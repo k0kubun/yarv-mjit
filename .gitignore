@@ -197,4 +197,6 @@ lcov*.info
 /win32/.time
 
 # MJIT
-rb_mjit_header-*.h
+rb_mjit_header.h
+rb_mjit_min_header-*.h*
+_mjit_header_minimized_file.c
