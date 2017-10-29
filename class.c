@@ -616,7 +616,7 @@ rb_define_class_id(ID id, VALUE super)
  * \return the value \c Class#inherited's returns
  * \pre Each of \a super and \a klass must be a \c Class object.
  */
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_class_inherited(VALUE super, VALUE klass)
 {
     ID inherited;
