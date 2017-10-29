@@ -675,7 +675,7 @@ rb_vm_ifunc_new(VALUE (*func)(ANYARGS), const void *data, int min_argc, int max_
     return IFUNC_NEW(func, data, arity.packed);
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_func_proc_new(rb_block_call_func_t func, VALUE val)
 {
     struct vm_ifunc *ifunc = rb_vm_ifunc_proc_new(func, (void *)val);

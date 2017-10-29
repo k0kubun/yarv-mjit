@@ -3018,7 +3018,7 @@ rb_check_convert_type(VALUE val, int type, const char *tname, const char *method
 }
 
 /*! \private */
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_check_convert_type_with_id(VALUE val, int type, const char *tname, ID method)
 {
     VALUE v;
