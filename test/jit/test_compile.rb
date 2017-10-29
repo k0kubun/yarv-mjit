@@ -188,7 +188,6 @@ class TestCompile < Test::Unit::TestCase
     end;
 
     assert_insns_compile(code, *insns)
-    skip # TODO
     assert_insns_compile(code, debug: true)
   end
 end
