@@ -664,6 +664,8 @@ make_no_method_exception(VALUE exc, VALUE format, VALUE obj,
     return rb_class_new_instance(n, args, exc);
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static void
 raise_method_missing(rb_thread_t *th, int argc, const VALUE *argv, VALUE obj,
 		     enum method_missing_reason last_call_status)
@@ -705,8 +707,6 @@ raise_method_missing(rb_thread_t *th, int argc, const VALUE *argv, VALUE obj,
 	rb_exc_raise(exc);
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 static inline VALUE
 method_missing(VALUE obj, ID id, int argc, const VALUE *argv, enum method_missing_reason call_status)

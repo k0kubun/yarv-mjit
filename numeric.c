@@ -1477,7 +1477,7 @@ flo_cmp(VALUE x, VALUE y)
     return rb_dbl_cmp(a, b);
 }
 
-int
+RUBY_FUNC_EXPORTED int
 rb_float_cmp(VALUE x, VALUE y)
 {
     return NUM2INT(flo_cmp(x, y));

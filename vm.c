@@ -500,7 +500,7 @@ rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_fra
     return 0;
 }
 
-rb_control_frame_t *
+RUBY_FUNC_EXPORTED rb_control_frame_t *
 rb_vm_get_ruby_level_next_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp)
 {
     while (!RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)) {
@@ -511,6 +511,8 @@ rb_vm_get_ruby_level_next_cfp(const rb_thread_t *th, const rb_control_frame_t *c
     }
     return 0;
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 static rb_control_frame_t *
 vm_get_ruby_level_caller_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp)
@@ -545,6 +547,8 @@ rb_vm_pop_cfunc_frame(void)
     RUBY_DTRACE_CMETHOD_RETURN_HOOK(th, me->owner, me->def->original_id);
     vm_pop_frame(th, cfp, cfp->ep);
 }
+
+#ifndef MJIT_HEADER
 
 void
 rb_vm_rewind_cfp(rb_thread_t *th, rb_control_frame_t *cfp)
@@ -1417,7 +1421,7 @@ make_localjump_error(const char *mesg, VALUE value, int reason)
     return exc;
 }
 
-void
+RUBY_FUNC_EXPORTED void
 rb_vm_localjump_error(const char *mesg, VALUE value, int reason)
 {
     VALUE exc = make_localjump_error(mesg, value, reason);
