@@ -73,8 +73,6 @@ cc     = ARGV[0]
 code   = File.read(ARGV[1]) # Current version of the header file.
 cflags = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
 
-code.gsub!(/^# \d+ [^\n]+\n/m, '') # Drop lines like `# 65 "/usr/include/stdint.h" 3 4`
-
 # Check initial file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'initial')
 STDERR.puts "\nTransforming external function to static:"

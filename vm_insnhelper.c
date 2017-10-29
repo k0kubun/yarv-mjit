@@ -1454,8 +1454,6 @@ opt_eql_func(VALUE recv, VALUE obj, CALL_INFO ci, CALL_CACHE cc)
 #undef BUILTIN_CLASS_P
 #undef EQ_UNREDEFINED_P
 
-#endif /* #ifndef MJIT_HEADER */
-
 VALUE
 rb_equal_opt(VALUE obj1, VALUE obj2)
 {
@@ -1481,6 +1479,8 @@ rb_eql_opt(VALUE obj1, VALUE obj2)
     cc.me = NULL;
     return opt_eql_func(obj1, obj2, &ci, &cc);
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 extern VALUE vm_call0(rb_thread_t*, VALUE, ID, int, const VALUE*, const rb_callable_method_entry_t *);
 
