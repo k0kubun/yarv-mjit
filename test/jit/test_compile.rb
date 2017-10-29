@@ -172,4 +172,23 @@ class TestCompile < Test::Unit::TestCase
       f.puts
     end
   end
+
+  def test_compile_rescue
+    insns = %w[
+      nop
+      putnil
+      trace
+      leave
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      begin
+      rescue
+      end
+    end;
+
+    assert_insns_compile(code, *insns)
+    skip # TODO
+    assert_insns_compile(code, debug: true)
+  end
 end
