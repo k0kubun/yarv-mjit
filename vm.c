@@ -9,19 +9,15 @@
 **********************************************************************/
 
 #include "internal.h"
-#ifndef MJIT_HEADER
 #include "ruby/vm.h"
 #include "ruby/st.h"
 
 #include "gc.h"
-#endif /* #ifndef MJIT_HEADER */
 #include "vm_core.h"
 #include "iseq.h"
 #include "eval_intern.h"
-#ifndef MJIT_HEADER
 #include "probes.h"
 #include "probes_helper.h"
-#endif /* #ifndef MJIT_HEADER */
 
 VALUE rb_str_concat_literals(size_t, const VALUE*);
 
@@ -55,15 +51,11 @@ rb_vm_search_cf_from_ep(const rb_thread_t * const th, const rb_control_frame_t *
     }
 }
 
-#ifndef MJIT_HEADER
-
 const VALUE *
 rb_vm_ep_local_ep(const VALUE *ep)
 {
     return VM_EP_LEP(ep);
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 PUREFUNC(static inline const VALUE *VM_CF_LEP(const rb_control_frame_t * const cfp));
 static inline const VALUE *
@@ -85,8 +77,6 @@ VM_CF_BLOCK_HANDLER(const rb_control_frame_t * const cfp)
     const VALUE *ep = VM_CF_LEP(cfp);
     return VM_ENV_BLOCK_HANDLER(ep);
 }
-
-#ifndef MJIT_HEADER
 
 VALUE
 rb_vm_frame_block_handler(const rb_control_frame_t *cfp)
@@ -152,8 +142,6 @@ rb_vm_ep_in_heap_p(const VALUE *ep)
 }
 #endif
 
-#endif /* #ifndef MJIT_HEADER */
-
 static struct rb_captured_block *
 VM_CFP_TO_CAPTURED_BLOCK(const rb_control_frame_t *cfp)
 {
@@ -176,8 +164,6 @@ VM_BH_FROM_CFP_P(VALUE block_handler, const rb_control_frame_t *cfp)
     const struct rb_captured_block *captured = VM_CFP_TO_CAPTURED_BLOCK(cfp);
     return VM_TAGGED_PTR_REF(block_handler, 0x03) == captured;
 }
-
-#ifndef MJIT_HEADER
 
 static VALUE
 vm_passed_block_handler(rb_thread_t *th)
@@ -308,8 +294,6 @@ extern VALUE vm_invoke_bmethod(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 			       int argc, const VALUE *argv, VALUE block_handler);
 static VALUE vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 			    int argc, const VALUE *argv, VALUE block_handler);
-
-#endif /* #ifndef MJIT_HEADER */
 
 #include "mjit.h"
 #include "vm_insnhelper.h"
