@@ -709,6 +709,8 @@ raise_method_missing(rb_execution_context_t *ec, int argc, const VALUE *argv, VA
     }
 }
 
+#endif /* #ifndef MJIT_HEADER */
+
 static inline VALUE
 method_missing(VALUE obj, ID id, int argc, const VALUE *argv, enum method_missing_reason call_status)
 {
@@ -739,6 +741,8 @@ method_missing(VALUE obj, ID id, int argc, const VALUE *argv, enum method_missin
     if (work) ALLOCV_END(work);
     return result;
 }
+
+#ifndef MJIT_HEADER
 
 RUBY_FUNC_EXPORTED void
 rb_raise_method_missing(rb_execution_context_t *ec, int argc, const VALUE *argv,
