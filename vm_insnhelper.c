@@ -305,15 +305,11 @@ rb_arity_error_new(int argc, int min, int max)
     return rb_exc_new3(rb_eArgError, err_mess);
 }
 
-#ifndef MJIT_HEADER
-
 void
 rb_error_arity(int argc, int min, int max)
 {
     rb_exc_raise(rb_arity_error_new(argc, min, max));
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 /* lvar */
 
@@ -340,8 +336,6 @@ vm_env_write(const VALUE *ep, int index, VALUE v)
 	vm_env_write_slowpath(ep, index, v);
     }
 }
-
-#ifndef MJIT_HEADER
 
 void
 rb_vm_env_write(const VALUE *ep, int index, VALUE v)
@@ -514,8 +508,6 @@ vm_getspecial(const rb_execution_context_t *ec, const VALUE *lep, rb_num_t key, 
     }
     return val;
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 PUREFUNC(static rb_callable_method_entry_t *check_method_entry(VALUE obj, int can_be_svar));
 static rb_callable_method_entry_t *
@@ -720,8 +712,6 @@ vm_get_const_key_cref(const VALUE *ep)
     return NULL;
 }
 
-#ifndef MJIT_HEADER
-
 void
 rb_vm_rewrite_cref(rb_cref_t *cref, VALUE old_klass, VALUE new_klass, rb_cref_t **new_cref_ptr)
 {
@@ -740,8 +730,6 @@ rb_vm_rewrite_cref(rb_cref_t *cref, VALUE old_klass, VALUE new_klass, rb_cref_t 
     }
     *new_cref_ptr = NULL;
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 static rb_cref_t *
 vm_cref_push(const rb_execution_context_t *ec, VALUE klass, const VALUE *ep, int pushed_by_eval)
@@ -1451,6 +1439,8 @@ opt_eql_func(VALUE recv, VALUE obj, CALL_INFO ci, CALL_CACHE cc)
 #undef BUILTIN_CLASS_P
 #undef EQ_UNREDEFINED_P
 
+#endif /* #ifndef MJIT_HEADER */
+
 VALUE
 rb_equal_opt(VALUE obj1, VALUE obj2)
 {
@@ -1476,8 +1466,6 @@ rb_eql_opt(VALUE obj1, VALUE obj2)
     cc.me = NULL;
     return opt_eql_func(obj1, obj2, &ci, &cc);
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 extern VALUE vm_call0(rb_execution_context_t *ec, VALUE, ID, int, const VALUE*, const rb_callable_method_entry_t *);
 
@@ -1734,8 +1722,6 @@ vm_call_iseq_setup_tailcall(rb_execution_context_t *ec, rb_control_frame_t *cfp,
     return Qundef;
 }
 
-#ifndef MJIT_HEADER
-
 static VALUE
 call_cfunc_m2(VALUE (*func)(ANYARGS), VALUE recv, int argc, const VALUE *argv)
 {
@@ -1843,8 +1829,6 @@ call_cfunc_15(VALUE (*func)(ANYARGS), VALUE recv, int argc, const VALUE *argv)
 {
     return (*func)(recv, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7], argv[8], argv[9], argv[10], argv[11], argv[12], argv[13], argv[14]);
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 #ifndef VM_PROFILE
 #define VM_PROFILE 0
@@ -2431,8 +2415,6 @@ vm_call_super_method(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, st
     return vm_call_method(ec, reg_cfp, calling, ci, cc);
 }
 
-#ifndef MJIT_HEADER
-
 /* super */
 
 static inline VALUE
@@ -2504,8 +2486,6 @@ vm_search_super_method(const rb_execution_context_t *ec, rb_control_frame_t *reg
 	CI_SET_FASTPATH(cc, vm_call_super_method, 1);
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 /* yield */
 
@@ -2648,8 +2628,6 @@ vm_yield_setup_args(rb_execution_context_t *ec, const rb_iseq_t *iseq, const int
 
     return vm_callee_setup_block_arg(ec, calling, ci, iseq, argv, arg_setup_type);
 }
-
-#ifndef MJIT_HEADER
 
 /* ruby iseq -> ruby block */
 
@@ -2933,8 +2911,6 @@ vm_defined(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, rb_num_t op_
     }
 }
 
-#endif /* #ifndef MJIT_HEADER */
-
 static const VALUE *
 vm_get_ep(const VALUE *const reg_ep, rb_num_t lv)
 {
@@ -3071,8 +3047,6 @@ vm_dtrace(rb_event_flag_t flag, rb_thread_t *th)
     }
 }
 
-#ifndef MJIT_HEADER
-
 static VALUE
 vm_const_get_under(ID id, rb_num_t flags, VALUE cbase)
 {
@@ -3183,8 +3157,6 @@ vm_define_module(ID id, rb_num_t flags, VALUE cbase)
     }
 }
 
-#endif /* #ifndef MJIT_HEADER */
-
 static VALUE
 vm_find_or_create_class_by_id(ID id,
 			      rb_num_t flags,
@@ -3292,8 +3264,6 @@ vm_ic_update(IC ic, VALUE val, const VALUE *reg_ep)
     ruby_vm_const_missing_count = 0;
 }
 
-#ifndef MJIT_HEADER
-
 static VALUE
 vm_once_dispatch(ISEQ iseq, IC ic, rb_thread_t *th)
 {
@@ -3324,8 +3294,6 @@ vm_once_dispatch(ISEQ iseq, IC ic, rb_thread_t *th)
 	goto again;
     }
 }
-
-#endif /* #ifndef MJIT_HEADER */
 
 static OFFSET
 vm_case_dispatch(CDHASH hash, OFFSET else_offset, VALUE key)
