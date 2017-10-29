@@ -341,6 +341,8 @@ vm_env_write(const VALUE *ep, int index, VALUE v)
     }
 }
 
+#ifndef MJIT_HEADER
+
 void
 rb_vm_env_write(const VALUE *ep, int index, VALUE v)
 {
@@ -367,8 +369,6 @@ rb_vm_bh_to_procval(const rb_execution_context_t *ec, VALUE block_handler)
 	}
     }
 }
-
-#ifndef MJIT_HEADER
 
 /* svar */
 
@@ -1306,10 +1306,11 @@ vm_expandarray(rb_control_frame_t *cfp, VALUE ary, rb_num_t num, int flag)
     RB_GC_GUARD(ary);
 }
 
+#ifndef MJIT_HEADER
+
 static VALUE vm_call_general(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc);
 
-ALWAYS_INLINE(static void vm_search_method(const struct rb_call_info *, struct rb_call_cache *, VALUE));
-static inline void
+RUBY_FUNC_EXPORTED void
 vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE recv)
 {
     VALUE klass = CLASS_OF(recv);
@@ -1334,6 +1335,8 @@ vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE 
     cc->class_serial = RCLASS_SERIAL(klass);
 #endif
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 static inline int
 check_cfunc(const rb_callable_method_entry_t *me, VALUE (*func)())
