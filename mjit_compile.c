@@ -95,27 +95,11 @@ fprint_opt_call_variables(FILE *f, unsigned int stack_size, unsigned int argc)
 static void
 fprint_opt_call_fallback(FILE *f, VALUE ci, VALUE cc, unsigned int stack_size, unsigned int argc, VALUE key)
 {
-    fprintf(f, "    if (stack[%d] == Qundef) {\n", stack_size - argc);
-    fprintf(f, "      struct rb_calling_info calling;\n");
-    fprintf(f, "      calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
-    fprintf(f, "      calling.argc = %d;\n", key ? argc : argc - 1);
-    fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = recv);\n", ci, cc);
-    fprintf(f, "      *(cfp->sp++) = recv;\n");
-    if (key) {
-	fprintf(f, "      *(cfp->sp++) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
-	if (argc >= 2) {
-	    fprintf(f, "      *(cfp->sp++) = obj;\n");
-	}
-    } else {
-	if (argc >= 2) {
-	    fprintf(f, "      *(cfp->sp++) = obj;\n");
-	}
-	if (argc >= 3) {
-	    fprintf(f, "      *(cfp->sp++) = obj2;\n");
-	}
-    }
-    fprint_call_method(f, ci, cc, stack_size - argc);
+    fprintf(f, "    if (result == Qundef) {\n");
+    fprintf(f, "      cfp->sp = cfp->ep + %d;\n", stack_size + 1);
+    fprintf(f, "      goto cancel;\n");
     fprintf(f, "    }\n");
+    fprintf(f, "    stack[%d] = result;\n", stack_size - argc);
 }
 
 /* Print optimized call with redefinition fallback and return stack size change.
@@ -128,7 +112,7 @@ fprint_opt_call(FILE *f, VALUE ci, VALUE cc, unsigned int stack_size, unsigned i
     fprintf(f, "  {\n");
     fprint_opt_call_variables(f, stack_size, argc);
 
-    fprintf(f, "    stack[%d] = ", stack_size - argc);
+    fprintf(f, "    VALUE result = ");
     va_start(va, format);
     vfprintf(f, format, va);
     va_end(va);
@@ -149,7 +133,7 @@ fprint_opt_call_with_key(FILE *f, VALUE ci, VALUE cc, VALUE key, unsigned int st
     fprintf(f, "  {\n");
     fprint_opt_call_variables(f, stack_size, argc);
 
-    fprintf(f, "    stack[%d] = ", stack_size - argc);
+    fprintf(f, "    VALUE result = ");
     va_start(va, format);
     vfprintf(f, format, va);
     va_end(va);
@@ -729,6 +713,18 @@ compile_insns(FILE *f, const struct rb_iseq_constant_body *body, unsigned int st
     }
 }
 
+/* Print basic block code to cancel JIT execution. */
+static void
+compile_cancel_handler(FILE *f, const struct rb_iseq_constant_body *body)
+{
+    unsigned int i;
+    fprintf(f, "cancel:\n");
+    for (i = 0; i < body->stack_max; i++) {
+	fprintf(f, "  *((VALUE *)cfp->ep + %d) = stack[%d];\n", i + 1, i);
+    }
+    fprintf(f, "  return Qundef;\n");
+}
+
 /* Compile ISeq to C code in F.  It returns 1 if it succeeds to compile. */
 int
 mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *funcname)
@@ -742,6 +738,7 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
 	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
     }
     compile_insns(f, body, 0, 0, &status);
+    compile_cancel_handler(f, body);
     fprintf(f, "}\n");
 
     xfree(status.compiled_for_pos);
