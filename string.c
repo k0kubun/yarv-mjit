@@ -2905,7 +2905,7 @@ rb_str_append(VALUE str, VALUE str2)
 
 #define MIN_PRE_ALLOC_SIZE 48
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_str_concat_literals(size_t num, const VALUE *strary)
 {
     VALUE str;
