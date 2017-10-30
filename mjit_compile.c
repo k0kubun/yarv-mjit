@@ -389,7 +389,11 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case YARVINSN_send:
 	{
 	    CALL_INFO ci = (CALL_INFO)operands[0];
+	    CALL_CACHE cc = (CALL_CACHE)operands[1];
 	    unsigned int push_count = ci->orig_argc + ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+
+	    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu)))\n", b->stack_size - 1 - push_count, cc->method_state, cc->class_serial);
+	    fprintf(f, "    goto cancel;\n");
 
 	    fprintf(f, "  {\n");
 	    fprintf(f, "    struct rb_calling_info calling;\n");
@@ -397,7 +401,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprint_args(f, push_count + 1, b->stack_size - push_count - 1);
 	    fprintf(f, "    vm_caller_setup_arg_block(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
 	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
-	    fprintf(f, "    vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = stack[%d]);\n", operands[0], operands[1], b->stack_size - 1 - push_count);
+	    fprintf(f, "    calling.recv = stack[%d];\n", b->stack_size - 1 - push_count);
 	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1);
 	    fprintf(f, "  }\n");
 	    b->stack_size -= push_count;
@@ -432,12 +436,16 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case YARVINSN_opt_send_without_block:
 	{
 	    CALL_INFO ci = (CALL_INFO)operands[0];
+	    CALL_CACHE cc = (CALL_CACHE)operands[1];
+
+	    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu)))\n", b->stack_size - 1 - ci->orig_argc, cc->method_state, cc->class_serial);
+	    fprintf(f, "    goto cancel;\n");
+
 	    fprintf(f, "  {\n");
 	    fprintf(f, "    struct rb_calling_info calling;\n");
 	    fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
 	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
-	    fprintf(f, "    vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = stack[%d]);\n",
-		    operands[0], operands[1], b->stack_size - 1 - ci->orig_argc);
+	    fprintf(f, "    calling.recv = stack[%d];\n", b->stack_size - 1 - ci->orig_argc);
 	    fprint_args(f, ci->orig_argc + 1, b->stack_size - ci->orig_argc - 1);
 	    fprint_call_method(f, operands[0], operands[1], b->stack_size - ci->orig_argc - 1);
 	    fprintf(f, "  }\n");
