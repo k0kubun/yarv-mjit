@@ -8,7 +8,6 @@ class TestCompile < Test::Unit::TestCase
     nop
     getlocal
     setlocal
-    setblockparam
     getspecial
     setspecial
     getinstancevariable
