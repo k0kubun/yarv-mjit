@@ -67,7 +67,9 @@ fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
 
 extern int simple_iseq_p(const rb_iseq_t *iseq);
 
-/* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`. */
+/* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`.
+   This method inlines fast path of vm_call_method_each_type for some types if inline_p is TRUE
+   (cc passes mjit_check_invalid_cc). */
 static void
 fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int inline_p)
 {
@@ -75,10 +77,14 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int
     CALL_INFO ci = (CALL_INFO)ci_v;
     CALL_CACHE cc = (CALL_CACHE)cc_v;
 
+    if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC) {
+	fprintf(f, "    stack[%d] = vm_call_cfunc(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, cc_v);
+	return;
+    }
+
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
-    /* If inline_p (mjit_check_invalid_cc is done), inline fast path of vm_call_method_each_type for some types */
     if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
 	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr))
 	&& !(ci->flag & VM_CALL_KW_SPLAT)) { /* the same check as vm_callee_setup_arg */
