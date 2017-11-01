@@ -1613,7 +1613,7 @@ vm_call_iseq_setup_normal_0start(rb_thread_t *th, rb_control_frame_t *cfp, struc
     return vm_call_iseq_setup_normal(th, cfp, calling, ci, cc, 0, param, local);
 }
 
-static inline int
+int
 simple_iseq_p(const rb_iseq_t *iseq)
 {
     return iseq->body->param.flags.has_opt == FALSE &&
