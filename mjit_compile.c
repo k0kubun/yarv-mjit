@@ -65,12 +65,35 @@ fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
     }
 }
 
+extern int simple_iseq_p(const rb_iseq_t *iseq);
+
 /* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`. */
 static void
-fprint_call_method(FILE *f, VALUE ci, VALUE cc, unsigned int result_pos)
+fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int inline_p)
 {
+    const rb_iseq_t *iseq;
+    CALL_INFO ci = (CALL_INFO)ci_v;
+    CALL_CACHE cc = (CALL_CACHE)cc_v;
+
     fprintf(f, "    {\n");
-    fprintf(f, "      VALUE v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc, ci, cc);
+    fprintf(f, "      VALUE v;\n");
+
+    /* If inline_p (mjit_check_invalid_cc is done), inline fast path of vm_call_method_each_type for some types */
+    if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
+	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr))
+	&& !(ci->flag & VM_CALL_KW_SPLAT)) { /* the same check as vm_callee_setup_arg */
+	/* vm_call_iseq_setup_normal */
+	int param_size = iseq->body->param.size;
+	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
+	fprintf(f, "      cfp->sp = argv - 1;\n"); /* recv */
+	fprintf(f, "      vm_push_frame(th, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
+		"calling.block_handler, 0x%"PRIxVALUE", 0x%"PRIxVALUE", argv + %d, %d, %d);\n",
+		(VALUE)iseq, (VALUE)cc->me, (VALUE)iseq->body->iseq_encoded, param_size, iseq->body->local_table_size - param_size, iseq->body->stack_max);
+	fprintf(f, "      v = Qundef;\n");
+    } else {
+	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+    }
+
     fprintf(f, "      if (v == Qundef && (v = mjit_exec(th)) == Qundef) {\n"); /* TODO: also call jit_exec */
     fprintf(f, "        VM_ENV_FLAGS_SET(th->ec.cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
     fprintf(f, "        stack[%d] = vm_exec(th);\n", result_pos);
@@ -169,7 +192,7 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
     }
     fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
     fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
-    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
+    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1, TRUE);
     fprintf(f, "  }\n");
     return -argc;
 }
@@ -459,7 +482,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    vm_caller_setup_arg_block(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", TRUE);\n", operands[0], operands[2]);
 	    fprintf(f, "    calling.recv = cfp->self;\n");
 	    fprintf(f, "    vm_search_super_method(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", operands[0], operands[1]);
-	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1);
+	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1, FALSE);
 	    fprintf(f, "  }\n");
 	    b->stack_size -= push_count;
 	}
