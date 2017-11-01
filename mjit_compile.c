@@ -53,13 +53,13 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
 
 /* push back stack in local variable to YARV's stack pointer */
 static void
-fprint_args(FILE *f, unsigned int argc, unsigned int pos)
+fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
 {
     if (argc) {
 	unsigned int i;
 	/* TODO: use memmove or memcopy, if not optimized by compiler */
 	for (i = 0; i < argc; i++) {
-	    fprintf(f, "    *(cfp->sp) = stack[%d];\n", pos + i);
+	    fprintf(f, "    *(cfp->sp) = stack[%d];\n", base_pos + i);
 	    fprintf(f, "    cfp->sp++;\n");
 	}
     }
@@ -143,6 +143,35 @@ fprint_opt_call_with_key(FILE *f, VALUE ci, VALUE cc, VALUE key, unsigned int st
     fprintf(f, "  }\n");
 
     return 1 - argc;
+}
+
+/* Compile send and opt_send_without_block instructions to `f`, and return stack size change */
+static int
+compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_block)
+{
+    CALL_INFO ci = (CALL_INFO)operands[0];
+    CALL_CACHE cc = (CALL_CACHE)operands[1];
+    unsigned int argc = ci->orig_argc; /* unlike `ci->orig_argc`, `argc` may include blockarg */
+    if (with_block) {
+	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+    }
+
+    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu)))\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
+    fprintf(f, "    goto cancel;\n");
+
+    fprintf(f, "  {\n");
+    fprintf(f, "    struct rb_calling_info calling;\n");
+    fprint_args(f, argc + 1, stack_size - argc - 1); /* +1 is for recv */
+    if (with_block) {
+	fprintf(f, "    vm_caller_setup_arg_block(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
+    } else {
+	fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
+    }
+    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
+    fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
+    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
+    fprintf(f, "  }\n");
+    return -argc;
 }
 
 struct case_dispatch_var {
@@ -387,25 +416,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       /* case YARVINSN_defineclass:
         break; */
       case YARVINSN_send:
-	{
-	    CALL_INFO ci = (CALL_INFO)operands[0];
-	    CALL_CACHE cc = (CALL_CACHE)operands[1];
-	    unsigned int push_count = ci->orig_argc + ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
-
-	    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu)))\n", b->stack_size - 1 - push_count, cc->method_state, cc->class_serial);
-	    fprintf(f, "    goto cancel;\n");
-
-	    fprintf(f, "  {\n");
-	    fprintf(f, "    struct rb_calling_info calling;\n");
-
-	    fprint_args(f, push_count + 1, b->stack_size - push_count - 1);
-	    fprintf(f, "    vm_caller_setup_arg_block(th, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
-	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
-	    fprintf(f, "    calling.recv = stack[%d];\n", b->stack_size - 1 - push_count);
-	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1);
-	    fprintf(f, "  }\n");
-	    b->stack_size -= push_count;
-	}
+	b->stack_size += compile_send(f, operands, b->stack_size, TRUE);
         break;
       case YARVINSN_opt_str_freeze:
 	fprintf(f, "  if (BASIC_OP_UNREDEFINED_P(BOP_FREEZE, STRING_REDEFINED_OP_FLAG)) {\n");
@@ -434,23 +445,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	b->stack_size += 1 - (unsigned int)operands[0];
         break;
       case YARVINSN_opt_send_without_block:
-	{
-	    CALL_INFO ci = (CALL_INFO)operands[0];
-	    CALL_CACHE cc = (CALL_CACHE)operands[1];
-
-	    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu)))\n", b->stack_size - 1 - ci->orig_argc, cc->method_state, cc->class_serial);
-	    fprintf(f, "    goto cancel;\n");
-
-	    fprintf(f, "  {\n");
-	    fprintf(f, "    struct rb_calling_info calling;\n");
-	    fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
-	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
-	    fprintf(f, "    calling.recv = stack[%d];\n", b->stack_size - 1 - ci->orig_argc);
-	    fprint_args(f, ci->orig_argc + 1, b->stack_size - ci->orig_argc - 1);
-	    fprint_call_method(f, operands[0], operands[1], b->stack_size - ci->orig_argc - 1);
-	    fprintf(f, "  }\n");
-	    b->stack_size -= ci->orig_argc;
-	}
+	b->stack_size += compile_send(f, operands, b->stack_size, FALSE);
         break;
       case YARVINSN_invokesuper:
 	{
