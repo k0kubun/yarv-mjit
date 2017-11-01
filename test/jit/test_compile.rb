@@ -141,14 +141,14 @@ class TestCompile < Test::Unit::TestCase
     begin;
       iseq = RubyVM::InstructionSequence.compile(<<-'begin;;' + "\\n" + <<-'end;;', nil, nil, 1#{feature_string})
       begin;;
-        #{NUM_CALLS_TO_ADD}.times do
-          unless $0
-            #{code}
-          end
+        unless $0
+          #{code}
         end
       end;;
       STDERR.puts iseq.disasm
-      iseq.eval
+      #{NUM_CALLS_TO_ADD}.times do
+        iseq.eval
+      end
       STDIN.getc
     end;
 
