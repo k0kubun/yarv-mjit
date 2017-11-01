@@ -638,7 +638,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_ltlt(recv, obj)");
         break;
       case YARVINSN_opt_aref:
-	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "vm_opt_aref(recv, obj)");
+	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 2, "mjit_opt_aref(recv, obj)");
         break;
       case YARVINSN_opt_aset:
 	b->stack_size += fprint_opt_call(f, operands[0], operands[1], b->stack_size, 3, "vm_opt_aset(recv, obj, obj2)");
