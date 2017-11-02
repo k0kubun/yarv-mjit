@@ -178,11 +178,286 @@ class TestCompile < Test::Unit::TestCase
       putnil
       trace
       leave
+      checkmatch
+      throw
     ]
     code = "#{<<-"begin;"}\n#{<<-'end;'}"
     begin;
       begin
       rescue
+      end
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_local_variable_with_context
+    insns = %w[
+      getlocal
+      setlocal
+      getlocal_OP__WC__0
+      getlocal_OP__WC__1
+      setlocal_OP__WC__0
+      setlocal_OP__WC__1
+      putspecialobject
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a = b = nil
+      -> {
+        -> {
+          a = b
+        }
+        a = b
+      }
+      a
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_variable
+    insns = %w[
+      getglobal
+      setglobal
+      getinstancevariable
+      setinstancevariable
+      getclassvariable
+      setclassvariable
+      getconstant
+      setconstant
+      getinlinecache
+      setinlinecache
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      $a = $a
+      @a = @a
+      @@a = @@a
+      A = A
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_special
+    insns = %w[
+      getspecial
+      setspecial
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      nil if 0..(b == 1)
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_string
+    insns = %w[
+      putstring
+      tostring
+      putobject
+      concatstrings
+      intern
+      opt_str_freeze
+      opt_str_uminus
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a = ""
+      a = "".freeze
+      a = -""
+      a = "#{a}b"
+      a = :"#{a}"
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_frozen_string_literal
+    insns = %w[
+      freezestring
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a = "#{a}"
+    end;
+
+    assert_insns_compile(code, *insns, frozen_string_literal: true)
+    assert_insns_compile(code,         frozen_string_literal: true, debug: true)
+  end
+
+  def test_compile_regexp
+    insns = %w[
+      toregexp
+      opt_regexpmatch1
+      opt_regexpmatch2
+      branchiftype
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a =~ /#{1}/
+      // =~ a
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_array
+    insns = %w[
+      newarray
+      duparray
+      expandarray
+      concatarray
+      splatarray
+      reverse
+      opt_newarray_max
+      opt_newarray_min
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a = []
+      a = [1, *a]
+      a = [*a, 1]
+      a, a = a
+      a, a, a = []
+      a = [].max
+      a = [].min
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_object
+    insns = %w[
+      putobject_OP_INT2FIX_O_0_C_
+      putobject_OP_INT2FIX_O_1_C_
+      newhash
+      newrange
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a = 0
+      a = 1
+      a = {}
+      a = a...1
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_jump_branch
+    insns = %w[
+      jump
+      branchif
+      branchunless
+      branchnil
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      a &&= a
+      a&.a ||= a
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_compile_stack_manipulation
+    insns = %w[
+      dup
+      dupn
+      setn
+      pop
+      swap
+      topn
+      adjuststack
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      [1, 2, 3, 4]
+      a = a[1, *a] ||= a
+      for a, a in a
+      end
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_method
+    insns = %w[
+      defined
+      putiseq
+      checkkeyword
+      invokeblock
+      invokesuper
+      putself
+      send
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      def foo(a: b)
+        super
+        yield
+      end
+      a = defined? foo
+      foo
+      foo {}
+    end;
+
+    assert_insns_compile(code, *insns)
+    assert_insns_compile(code, debug: true)
+  end
+
+  def test_opt
+    insns = %w[
+      opt_send_without_block
+      opt_case_dispatch
+      opt_plus
+      opt_minus
+      opt_mult
+      opt_div
+      opt_mod
+      opt_eq
+      opt_neq
+      opt_ge
+      opt_gt
+      opt_le
+      opt_lt
+      opt_ltlt
+      opt_not
+      opt_aref
+      opt_aset
+      opt_aref_with
+      opt_aset_with
+      opt_empty_p
+      opt_length
+      opt_size
+      opt_succ
+    ]
+    code = "#{<<-"begin;"}\n#{<<-'end;'}"
+    begin;
+      case !foo + 1 - 1 * 1 / 1 % 1 << 1
+      when 1
+        1 != 1
+        1 == 1
+        1 < 1
+        1 > 1
+        1 <= 1
+        1 >= 1
+        1[1] = 1[1]
+        1[""] = 1[""]
+        1.succ.size.length.empty?
       end
     end;
 
