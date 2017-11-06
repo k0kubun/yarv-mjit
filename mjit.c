@@ -69,12 +69,31 @@
    constraint.  So the correct version of code based on SIGCHLD and
    WNOHANG waitpid would be very complicated.  */
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <windows.h>
+#include <pthread.h>
+#else
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <dlfcn.h>
+#endif
+
 #include "vm_core.h"
 #include "mjit.h"
 #include "version.h"
+
+#ifdef _WIN32
+#define dlopen(name,flag) ((void*)LoadLibrary(name))
+#define dlerror() strerror(rb_w32_map_errno(GetLastError()))
+#define dlsym(handle,name) ((void*)GetProcAddress((handle),(name)))
+#define RTLD_NOW  -1
+
+#define waitpid(pid,stat_loc,options) (WaitForSingleObject((pid), INFINITE), GetExitCodeProcess((pid), (stat_loc)))
+#define WIFEXITED(S) ((S) != STILL_ACTIVE)
+#define WEXITSTATUS(S) (S)
+#define WIFSIGNALED(S) (0)
+#endif
 
 /* A copy of MJIT portion of MRI options since MJIT initialization.  We
    need them as MJIT threads still can work when the most MRI data were
@@ -238,6 +257,9 @@ start_process(const char *path, char *const argv[])
 	    fprintf(stderr, " %s", arg);
 	fprintf(stderr, "\n");
     }
+#ifdef _WIN32
+    pid = spawnvp(_P_NOWAIT, path, argv);
+#else
     if ((pid = vfork()) == 0) {
 	if (mjit_opts.verbose == 0) {
 	    /* CC can be started in a thread using a file which has been
@@ -255,6 +277,7 @@ start_process(const char *path, char *const argv[])
 	fprintf(stderr, "MJIT: Error in execvp: %s", path);
 	_exit(1);
     }
+#endif
     return pid;
 }
 
