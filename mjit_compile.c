@@ -125,7 +125,7 @@ static void
 fprint_opt_call_fallback(FILE *f, VALUE ci, VALUE cc, unsigned int stack_size, unsigned int argc, VALUE key)
 {
     fprintf(f, "    if (result == Qundef) {\n");
-    fprintf(f, "      cfp->sp = cfp->ep + %d;\n", stack_size + 1);
+    fprintf(f, "      cfp->sp = cfp->ep + %d;\n", stack_size + 1); /* sp is initially ep+1 and increased as stack size */
     fprintf(f, "      goto cancel;\n");
     fprintf(f, "    }\n");
     fprintf(f, "    stack[%d] = result;\n", stack_size - argc);
@@ -185,8 +185,10 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
     }
 
-    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu)))\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
+    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
+    fprintf(f, "    cfp->sp = cfp->ep + %d;\n", stack_size + 1); /* sp is initially ep+1 and increased as stack size */
     fprintf(f, "    goto cancel;\n");
+    fprintf(f, "  }\n");
 
     fprintf(f, "  {\n");
     fprintf(f, "    struct rb_calling_info calling;\n");
