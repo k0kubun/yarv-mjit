@@ -1288,7 +1288,9 @@ vm_expandarray(rb_control_frame_t *cfp, VALUE ary, rb_num_t num, int flag)
     RB_GC_GUARD(ary);
 }
 
-#ifndef MJIT_HEADER
+#ifdef MJIT_HEADER
+extern void vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE recv);
+#else /* #ifdef MJIT_HEADER */
 
 static VALUE vm_call_general(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc);
 
@@ -1318,7 +1320,7 @@ vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE 
 #endif
 }
 
-#endif /* #ifndef MJIT_HEADER */
+#endif /* #ifdef MJIT_HEADER */
 
 static inline int
 check_cfunc(const rb_callable_method_entry_t *me, VALUE (*func)())
