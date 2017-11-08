@@ -125,7 +125,7 @@ static void
 fprint_opt_call_fallback(FILE *f, VALUE ci, VALUE cc, unsigned int stack_size, unsigned int argc, VALUE key)
 {
     fprintf(f, "    if (result == Qundef) {\n");
-    fprintf(f, "      cfp->sp = cfp->ep + %d;\n", stack_size + 1); /* sp is initially ep+1 and increased as stack size */
+    fprintf(f, "      cfp->sp = cfp->bp + %d;\n", stack_size + 1);
     fprintf(f, "      goto cancel;\n");
     fprintf(f, "    }\n");
     fprintf(f, "    stack[%d] = result;\n", stack_size - argc);
@@ -186,7 +186,7 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
     }
 
     fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
-    fprintf(f, "    cfp->sp = cfp->ep + %d;\n", stack_size + 1); /* sp is initially ep+1 and increased as stack size */
+    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
     fprintf(f, "    goto cancel;\n");
     fprintf(f, "  }\n");
 
@@ -754,7 +754,7 @@ compile_cancel_handler(FILE *f, const struct rb_iseq_constant_body *body)
     unsigned int i;
     fprintf(f, "cancel:\n");
     for (i = 0; i < body->stack_max; i++) {
-	fprintf(f, "  *((VALUE *)cfp->ep + %d) = stack[%d];\n", i + 1, i);
+	fprintf(f, "  *((VALUE *)cfp->bp + %d) = stack[%d];\n", i + 1, i);
     }
     fprintf(f, "  return Qundef;\n");
 }
