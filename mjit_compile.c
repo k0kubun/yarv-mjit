@@ -185,7 +185,7 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
     }
 
-    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
+    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], (CALL_CACHE)0x%"PRIxVALUE"))) {\n", stack_size - 1 - argc, cc);
     fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
     fprintf(f, "    goto cancel;\n");
     fprintf(f, "  }\n");
