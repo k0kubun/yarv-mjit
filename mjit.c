@@ -593,10 +593,22 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 	const char *s;
 	fprintf(f, "#include \"");
 	/* print pch_file except .gch */
-	for (s = pch_file; strcmp(s, ".gch") != 0; s++)
-	    fprintf(f, "%c", *s);
+	for (s = pch_file; strcmp(s, ".gch") != 0; s++) {
+	    switch(*s) {
+	      case '\\':
+		fprintf(f, "\\%c", *s);
+		break;
+	      default:
+		fprintf(f, "%c", *s);
+	    }
+	}
 	fprintf(f, "\"\n");
     }
+
+#ifdef _WIN32
+    fprintf(f, "void _pei386_runtime_relocator(void){}\n");
+    fprintf(f, "int __stdcall DllMainCRTStartup(void* hinstDLL, unsigned int fdwReason, void* lpvReserved) { return 1; }\n");
+#endif
 
     /* wait until mjit_gc_finish_hook is called */
     CRITICAL_SECTION_START(3, "before mjit_compile to wait GC finish");
