@@ -72,16 +72,16 @@ extern int simple_iseq_p(const rb_iseq_t *iseq);
 #define IS_ARGS_KEYWORD(ci) ((ci)->flag & VM_CALL_KWARG)
 
 /* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`.
-   This method inlines fast path of vm_call_method_each_type for some types if inline_p is TRUE
-   (cc passes mjit_check_invalid_cc). */
+   This method inlines fast path of vm_call_method_each_type for some types assuming
+   that cc passes mjit_check_invalid_cc. */
 static void
-fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int inline_p)
+fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 {
     const rb_iseq_t *iseq;
     CALL_INFO ci = (CALL_INFO)ci_v;
     CALL_CACHE cc = (CALL_CACHE)cc_v;
 
-    if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC) {
+    if (cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC) {
 	fprintf(f, "    stack[%d] = mjit_call_cfunc(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, (VALUE)cc->me);
 	return;
     }
@@ -90,7 +90,7 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int
     fprintf(f, "      VALUE v;\n");
 
     /* In the condition that CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup, this inlines vm_call_iseq_setup_normal */
-    if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
+    if (cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
 	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr)) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
 	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)) /* CI_SET_FASTPATH */) {
 	/* TODO: check calling->argc for argument_arity_error */
@@ -205,7 +205,7 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
     }
     fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
     fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
-    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1, TRUE);
+    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
     fprintf(f, "  }\n");
     return -argc;
 }
@@ -495,7 +495,15 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", TRUE);\n", operands[0], operands[2]);
 	    fprintf(f, "    calling.recv = cfp->self;\n");
 	    fprintf(f, "    vm_search_super_method(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", operands[0], operands[1]);
-	    fprint_call_method(f, operands[0], operands[1], b->stack_size - push_count - 1, FALSE);
+	    fprintf(f, "    {\n");
+	    fprintf(f, "      VALUE v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", operands[1], operands[0], operands[1]);
+	    fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n"); /* TODO: we need some check to call `mjit_exec` directly (skipping setjmp), but not done yet */
+	    fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
+	    fprintf(f, "        stack[%d] = vm_exec(ec);\n", b->stack_size - push_count - 1);
+	    fprintf(f, "      } else {\n");
+	    fprintf(f, "        stack[%d] = v;\n", b->stack_size - push_count - 1);
+	    fprintf(f, "      }\n");
+	    fprintf(f, "    }\n");
 	    fprintf(f, "  }\n");
 	    b->stack_size -= push_count;
 	}
