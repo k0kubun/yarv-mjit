@@ -9,6 +9,12 @@ module MJITHeader
   ATTR_REGEXP        = /__attribute__\s*\(\((#{ATTR_VALUE_REGEXP})*\)\)/
   FUNC_HEADER_REGEXP = /\A(\s*#{ATTR_REGEXP})*[^\[{(]*\((#{ATTR_REGEXP}|[^()])*\)(\s*#{ATTR_REGEXP})*\s*/
 
+  # For MinGW's ras.h. Those macros have its name in its definition and can't be preprocessed multiple times.
+  MACRO_BLACKLIST    = %w[
+    RASCTRYINFO
+    RASIPADDR
+  ]
+
   # Return start..stop of last (N>=1) decls in CODE ending STOP
   def self.find_decl(code, stop, n)
     level = curr = start = 0
@@ -55,12 +61,16 @@ module MJITHeader
       f.puts code
       f.close
 
-      unless system("#{cc} #{cflags} #{f.path} 2>/dev/null")
+      unless system("#{cc} #{cflags} #{f.path} 2>#{File::NULL}")
         STDERR.puts "error in #{stage} header file:"
         system("#{cc} #{cflags} #{f.path}")
         exit 1
       end
     end
+  end
+
+  def self.remove_bad_macros!(code)
+    code.gsub!(/^#define #{Regexp.union(MACRO_BLACKLIST)} .*$/, '')
   end
 end
 
@@ -73,8 +83,15 @@ cc     = ARGV[0]
 code   = File.read(ARGV[1]) # Current version of the header file.
 cflags = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
 
+MJITHeader.remove_bad_macros!(code)
+
 # Check initial file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'initial')
+if RUBY_PLATFORM =~ /mingw/ # transformation is broken on MinGW for now
+  puts code
+  exit 0
+end
+
 STDERR.puts "\nTransforming external function to static:"
 
 stop_pos     = code.length - 1
