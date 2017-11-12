@@ -526,17 +526,24 @@ compile_c_to_so(const char *c_file, const char *so_file)
     int exit_code;
     static const char *input[] = {NULL, NULL};
     static const char *output[] = {"-o",  NULL, NULL};
+    static const char *libs[] = {
+#ifdef _WIN32
+	/* Link to ruby.dll.a, because Windows DLLs don't allow unresolved symbols. */
+	"-L" LIBRUBY_LIBDIR,
+	LIBRUBYARG_SHARED,
+#endif
+	NULL};
     char **args;
 
     input[0] = c_file;
     output[1] = so_file;
     if (mjit_opts.llvm) {
 	LLVM_USE_PCH_ARGS[1] = pch_file;
-	args = form_args(4, (mjit_opts.debug ? LLVM_COMMON_ARGS_DEBUG : LLVM_COMMON_ARGS),
-			 LLVM_USE_PCH_ARGS, input, output);
+	args = form_args(5, (mjit_opts.debug ? LLVM_COMMON_ARGS_DEBUG : LLVM_COMMON_ARGS),
+			 LLVM_USE_PCH_ARGS, input, output, libs);
     } else {
-	args = form_args(4, (mjit_opts.debug ? GCC_COMMON_ARGS_DEBUG : GCC_COMMON_ARGS),
-			 GCC_USE_PCH_ARGS, input, output);
+	args = form_args(5, (mjit_opts.debug ? GCC_COMMON_ARGS_DEBUG : GCC_COMMON_ARGS),
+			 GCC_USE_PCH_ARGS, input, output, libs);
     }
     if (args == NULL)
 	return FALSE;
