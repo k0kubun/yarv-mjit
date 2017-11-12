@@ -531,6 +531,7 @@ compile_c_to_so(const char *c_file, const char *so_file)
 	/* Link to ruby.dll.a, because Windows DLLs don't allow unresolved symbols. */
 	"-L" LIBRUBY_LIBDIR,
 	LIBRUBYARG_SHARED,
+	"-lmsvcrt",
 #endif
 	NULL};
     char **args;
