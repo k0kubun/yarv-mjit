@@ -67,9 +67,29 @@ fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
 
 extern int simple_iseq_p(const rb_iseq_t *iseq);
 
+static int
+inlinable_cfunc_p(CALL_CACHE cc)
+{
+    return cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
+}
+
 /* TODO: move to somewhere shared with vm_args.c */
 #define IS_ARGS_SPLAT(ci)   ((ci)->flag & VM_CALL_ARGS_SPLAT)
 #define IS_ARGS_KEYWORD(ci) ((ci)->flag & VM_CALL_KWARG)
+
+/* return iseq pointer if inlinable, otherwise NULL. */
+static const rb_iseq_t *
+inlinable_iseq(CALL_INFO ci, CALL_CACHE cc)
+{
+    const rb_iseq_t *iseq;
+    if (cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
+	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr)) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
+	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)) /* CI_SET_FASTPATH */) {
+	return iseq;
+    } else {
+	return NULL;
+    }
+}
 
 /* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`.
    This method inlines fast path of vm_call_method_each_type for some types assuming
@@ -78,10 +98,9 @@ static void
 fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 {
     const rb_iseq_t *iseq;
-    CALL_INFO ci = (CALL_INFO)ci_v;
     CALL_CACHE cc = (CALL_CACHE)cc_v;
 
-    if (cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC) {
+    if (inlinable_cfunc_p(cc)) {
 	fprintf(f, "    stack[%d] = mjit_call_cfunc(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, (VALUE)cc->me);
 	return;
     }
@@ -90,9 +109,7 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
     fprintf(f, "      VALUE v;\n");
 
     /* In the condition that CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup, this inlines vm_call_iseq_setup_normal */
-    if (cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
-	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr)) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
-	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)) /* CI_SET_FASTPATH */) {
+    if (iseq = inlinable_iseq((CALL_INFO)ci_v, cc)) {
 	/* TODO: check calling->argc for argument_arity_error */
 	int param_size = iseq->body->param.size;
 	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
@@ -112,6 +129,39 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
     fprintf(f, "        stack[%d] = v;\n", result_pos);
     fprintf(f, "      }\n");
     fprintf(f, "    }\n");
+}
+
+/* Compile send and opt_send_without_block instructions to `f`, and return stack size change */
+static int
+compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_block)
+{
+    CALL_INFO ci = (CALL_INFO)operands[0];
+    CALL_CACHE cc = (CALL_CACHE)operands[1];
+    unsigned int argc = ci->orig_argc; /* unlike `ci->orig_argc`, `argc` may include blockarg */
+    if (with_block) {
+	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+    }
+
+    if (inlinable_cfunc_p(cc) || inlinable_iseq(ci, cc)) {
+	fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
+	fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
+	fprintf(f, "    goto cancel;\n");
+	fprintf(f, "  }\n");
+    }
+
+    fprintf(f, "  {\n");
+    fprintf(f, "    struct rb_calling_info calling;\n");
+    fprint_args(f, argc + 1, stack_size - argc - 1); /* +1 is for recv */
+    if (with_block) {
+	fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
+    } else {
+	fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
+    }
+    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
+    fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
+    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
+    fprintf(f, "  }\n");
+    return -argc;
 }
 
 static void
@@ -177,37 +227,6 @@ fprint_opt_call_with_key(FILE *f, VALUE ci, VALUE cc, VALUE key, unsigned int st
     fprintf(f, "  }\n");
 
     return 1 - argc;
-}
-
-/* Compile send and opt_send_without_block instructions to `f`, and return stack size change */
-static int
-compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_block)
-{
-    CALL_INFO ci = (CALL_INFO)operands[0];
-    CALL_CACHE cc = (CALL_CACHE)operands[1];
-    unsigned int argc = ci->orig_argc; /* unlike `ci->orig_argc`, `argc` may include blockarg */
-    if (with_block) {
-	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
-    }
-
-    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
-    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
-    fprintf(f, "    goto cancel;\n");
-    fprintf(f, "  }\n");
-
-    fprintf(f, "  {\n");
-    fprintf(f, "    struct rb_calling_info calling;\n");
-    fprint_args(f, argc + 1, stack_size - argc - 1); /* +1 is for recv */
-    if (with_block) {
-	fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
-    } else {
-	fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
-    }
-    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
-    fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
-    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
-    fprintf(f, "  }\n");
-    return -argc;
 }
 
 struct case_dispatch_var {
