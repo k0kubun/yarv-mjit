@@ -67,6 +67,10 @@ fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
 
 extern int simple_iseq_p(const rb_iseq_t *iseq);
 
+/* TODO: move to somewhere shared with vm_args.c */
+#define IS_ARGS_SPLAT(ci)   ((ci)->flag & VM_CALL_ARGS_SPLAT)
+#define IS_ARGS_KEYWORD(ci) ((ci)->flag & VM_CALL_KWARG)
+
 /* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`.
    This method inlines fast path of vm_call_method_each_type for some types if inline_p is TRUE
    (cc passes mjit_check_invalid_cc). */
@@ -85,10 +89,11 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
+    /* In the condition that CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup, this inlines vm_call_iseq_setup_normal */
     if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
-	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr))
-	&& !(ci->flag & VM_CALL_KW_SPLAT)) { /* the same check as vm_callee_setup_arg */
-	/* vm_call_iseq_setup_normal */
+	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr)) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
+	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)) /* CI_SET_FASTPATH */) {
+	/* TODO: check calling->argc for argument_arity_error */
 	int param_size = iseq->body->param.size;
 	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
 	fprintf(f, "      cfp->sp = argv - 1;\n"); /* recv */
