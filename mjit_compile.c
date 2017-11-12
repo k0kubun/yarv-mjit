@@ -78,7 +78,7 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int
     CALL_CACHE cc = (CALL_CACHE)cc_v;
 
     if (inline_p && cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC) {
-	fprintf(f, "    stack[%d] = vm_call_cfunc(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, cc_v);
+	fprintf(f, "    stack[%d] = mjit_call_cfunc(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, (VALUE)cc->me);
 	return;
     }
 
