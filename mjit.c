@@ -83,6 +83,11 @@
 #include "mjit.h"
 #include "version.h"
 
+extern void native_mutex_lock(rb_nativethread_lock_t *lock);
+extern void native_mutex_unlock(rb_nativethread_lock_t *lock);
+extern void native_mutex_initialize(rb_nativethread_lock_t *lock);
+extern void native_mutex_destroy(rb_nativethread_lock_t *lock);
+
 #ifdef _WIN32
 #define dlopen(name,flag) ((void*)LoadLibrary(name))
 #define dlerror() strerror(rb_w32_map_errno(GetLastError()))
@@ -120,7 +125,7 @@ static struct rb_mjit_unit *unit_queue;
 /* The number of so far processed ISEQs.  */
 static int current_unit_num;
 /* A mutex for conitionals and critical sections.  */
-static pthread_mutex_t mjit_engine_mutex;
+static rb_nativethread_lock_t mjit_engine_mutex;
 /* A thread conditional to wake up `mjit_finish` at the end of PCH thread.  */
 static pthread_cond_t mjit_pch_wakeup;
 /* A thread conditional to wake up the client if there is a change in
@@ -314,13 +319,8 @@ exec_process(const char *path, char *const argv[])
 static inline void
 CRITICAL_SECTION_START(int level, const char *msg)
 {
-    int err_code;
-
     verbose(level, "Locking %s", msg);
-    if ((err_code = pthread_mutex_lock(&mjit_engine_mutex)) != 0) {
-	fprintf(stderr, "Cannot lock MJIT mutex '%s'\n", msg);
-	fprintf(stderr, "error: %s\n", strerror(err_code));
-    }
+    native_mutex_lock(&mjit_engine_mutex);
     verbose(level, "Locked %s", msg);
 }
 
@@ -330,7 +330,7 @@ static inline void
 CRITICAL_SECTION_FINISH(int level, const char *msg)
 {
     verbose(level, "Unlocked %s", msg);
-    pthread_mutex_unlock(&mjit_engine_mutex);
+    native_mutex_unlock(&mjit_engine_mutex);
 }
 
 /* Wait until workers don't compile any iseq.  It is called at the
@@ -838,8 +838,8 @@ mjit_init(struct mjit_options *opts)
     }
 
     /* Initialize mutex */
-    if (pthread_mutex_init(&mjit_engine_mutex, NULL) != 0
-	|| pthread_cond_init(&mjit_pch_wakeup, NULL) != 0
+    native_mutex_initialize(&mjit_engine_mutex);
+    if (pthread_cond_init(&mjit_pch_wakeup, NULL) != 0
 	|| pthread_cond_init(&mjit_client_wakeup, NULL) != 0
 	|| pthread_cond_init(&mjit_worker_wakeup, NULL) != 0
 	|| pthread_cond_init(&mjit_gc_wakeup, NULL) != 0) {
@@ -859,7 +859,7 @@ mjit_init(struct mjit_options *opts)
 	pthread_detach(worker_pid);
     } else {
 	mjit_init_p = FALSE;
-	pthread_mutex_destroy(&mjit_engine_mutex);
+	native_mutex_destroy(&mjit_engine_mutex);
 	pthread_cond_destroy(&mjit_pch_wakeup);
 	pthread_cond_destroy(&mjit_client_wakeup);
 	pthread_cond_destroy(&mjit_worker_wakeup);
@@ -902,7 +902,7 @@ mjit_finish()
 	CRITICAL_SECTION_FINISH(3, "in mjit_finish");
     }
 
-    pthread_mutex_destroy(&mjit_engine_mutex);
+    native_mutex_destroy(&mjit_engine_mutex);
     pthread_cond_destroy(&mjit_pch_wakeup);
     pthread_cond_destroy(&mjit_client_wakeup);
     pthread_cond_destroy(&mjit_worker_wakeup);
