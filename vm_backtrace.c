@@ -594,7 +594,7 @@ rb_backtrace_to_str_ary(VALUE self)
     return bt->strary;
 }
 
-void
+RUBY_FUNC_EXPORTED void
 rb_backtrace_use_iseq_first_lineno_for_last_location(VALUE self)
 {
     const rb_backtrace_t *bt;
