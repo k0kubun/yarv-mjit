@@ -169,7 +169,7 @@ get_string(const char *str)
 static void
 sprint_uniq_filename(char *str, unsigned long id, const char *prefix, const char *suffix)
 {
-    char *tmp = getenv("TMP"); /* For MinGW */
+    const char *tmp = getenv("TMP"); /* For MinGW */
     if (tmp == NULL)
 	tmp = "/tmp";
     sprintf(str, "%s/%sp%luu%lu%s", tmp, prefix, (unsigned long) getpid(), id, suffix);
