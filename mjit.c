@@ -88,6 +88,14 @@ extern void native_mutex_unlock(rb_nativethread_lock_t *lock);
 extern void native_mutex_initialize(rb_nativethread_lock_t *lock);
 extern void native_mutex_destroy(rb_nativethread_lock_t *lock);
 
+extern void native_cond_initialize(rb_nativethread_cond_t *cond, int flags);
+extern void native_cond_destroy(rb_nativethread_cond_t *cond);
+extern void native_cond_signal(rb_nativethread_cond_t *cond);
+extern void native_cond_broadcast(rb_nativethread_cond_t *cond);
+extern void native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex);
+
+#define RB_CONDATTR_CLOCK_MONOTONIC 1
+
 #ifdef _WIN32
 #define dlopen(name,flag) ((void*)LoadLibrary(name))
 #define dlerror() strerror(rb_w32_map_errno(GetLastError()))
@@ -127,15 +135,15 @@ static int current_unit_num;
 /* A mutex for conitionals and critical sections.  */
 static rb_nativethread_lock_t mjit_engine_mutex;
 /* A thread conditional to wake up `mjit_finish` at the end of PCH thread.  */
-static pthread_cond_t mjit_pch_wakeup;
+static rb_nativethread_cond_t mjit_pch_wakeup;
 /* A thread conditional to wake up the client if there is a change in
    executed unit status.  */
-static pthread_cond_t mjit_client_wakeup;
+static rb_nativethread_cond_t mjit_client_wakeup;
 /* A thread conditional to wake up a worker if there we have something
    to add or we need to stop MJIT engine.  */
-static pthread_cond_t mjit_worker_wakeup;
+static rb_nativethread_cond_t mjit_worker_wakeup;
 /* A thread conditional to wake up workers if at the end of GC.  */
-static pthread_cond_t mjit_gc_wakeup;
+static rb_nativethread_cond_t mjit_gc_wakeup;
 /* True when GC is working.  */
 static int in_gc;
 /* True when JIT is working.  */
@@ -343,7 +351,7 @@ mjit_gc_start_hook()
     CRITICAL_SECTION_START(4, "mjit_gc_start_hook");
     while (in_jit) {
 	verbose(4, "Waiting wakeup from a worker for GC");
-	pthread_cond_wait(&mjit_client_wakeup, &mjit_engine_mutex);
+	native_cond_wait(&mjit_client_wakeup, &mjit_engine_mutex);
 	verbose(4, "Getting wakeup from a worker for GC");
     }
     in_gc = TRUE;
@@ -360,9 +368,7 @@ mjit_gc_finish_hook()
     CRITICAL_SECTION_START(4, "mjit_gc_finish_hook");
     in_gc = FALSE;
     verbose(4, "Sending wakeup signal to workers after GC");
-    if (pthread_cond_broadcast(&mjit_gc_wakeup) != 0) {
-        fprintf(stderr, "Cannot send wakeup signal to workers in mjit_gc_finish_hook\n");
-    }
+    native_cond_broadcast(&mjit_gc_wakeup);
     CRITICAL_SECTION_FINISH(4, "mjit_gc_finish_hook");
 }
 
@@ -513,9 +519,7 @@ make_pch()
 	pch_status = PCH_FAILED;
     }
     /* wakeup `mjit_finish` */
-    if (pthread_cond_broadcast(&mjit_pch_wakeup) != 0) {
-	fprintf(stderr, "Cannot send client wakeup signal in make_pch\n");
-    }
+    native_cond_broadcast(&mjit_pch_wakeup);
     CRITICAL_SECTION_FINISH(3, "in make_pch");
 }
 
@@ -615,7 +619,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     CRITICAL_SECTION_START(3, "before mjit_compile to wait GC finish");
     while (in_gc) {
 	verbose(3, "Waiting wakeup from GC");
-	pthread_cond_wait(&mjit_gc_wakeup, &mjit_engine_mutex);
+	native_cond_wait(&mjit_gc_wakeup, &mjit_engine_mutex);
     }
     in_jit = TRUE;
     CRITICAL_SECTION_FINISH(3, "before mjit_compile to wait GC finish");
@@ -630,9 +634,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     CRITICAL_SECTION_START(3, "after mjit_compile to wakeup client for GC");
     in_jit = FALSE;
     verbose(3, "Sending wakeup signal to client in a mjit-worker for GC");
-    if (pthread_cond_signal(&mjit_client_wakeup) != 0) {
-	fprintf(stderr, "Cannot send wakeup signal to client in mjit-worker\n");
-    }
+    native_cond_signal(&mjit_client_wakeup);
     CRITICAL_SECTION_FINISH(3, "in worker to wakeup client for GC");
 
     fclose(f);
@@ -688,9 +690,7 @@ worker(void *arg)
 	CRITICAL_SECTION_START(3, "in worker to update worker_finished");
 	worker_finished = TRUE;
 	verbose(3, "Sending wakeup signal to client in a mjit-worker");
-	if (pthread_cond_signal(&mjit_client_wakeup) != 0) {
-	    fprintf(stderr, "Cannot send wakeup signal to client in mjit-worker\n");
-	}
+	native_cond_signal(&mjit_client_wakeup);
 	CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
 	return NULL;
     }
@@ -702,7 +702,7 @@ worker(void *arg)
 	/* wait until unit is available */
 	CRITICAL_SECTION_START(3, "in worker dequeue");
 	while (unit_queue == NULL && !finish_worker_p) {
-	    pthread_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
+	    native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
 	    verbose(3, "Getting wakeup from client");
 	}
 	unit = get_from_unit_queue();
@@ -761,9 +761,7 @@ mjit_add_iseq_to_process(const rb_iseq_t *iseq)
     add_to_unit_queue(unit);
     /* TODO: Unload some units if it's >= max_cache_size */
     verbose(3, "Sending wakeup signal to workers in mjit_add_iseq_to_process");
-    if (pthread_cond_broadcast(&mjit_worker_wakeup) != 0) {
-	fprintf(stderr, "Cannot send wakeup signal to workers in add_iseq_to_process\n");
-    }
+    native_cond_broadcast(&mjit_worker_wakeup);
     CRITICAL_SECTION_FINISH(3, "in add_iseq_to_process");
 }
 
@@ -839,14 +837,10 @@ mjit_init(struct mjit_options *opts)
 
     /* Initialize mutex */
     native_mutex_initialize(&mjit_engine_mutex);
-    if (pthread_cond_init(&mjit_pch_wakeup, NULL) != 0
-	|| pthread_cond_init(&mjit_client_wakeup, NULL) != 0
-	|| pthread_cond_init(&mjit_worker_wakeup, NULL) != 0
-	|| pthread_cond_init(&mjit_gc_wakeup, NULL) != 0) {
-	mjit_init_p = FALSE;
-	verbose(1, "Failure in MJIT mutex initialization\n");
-	return;
-    }
+    native_cond_initialize(&mjit_pch_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
+    native_cond_initialize(&mjit_client_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
+    native_cond_initialize(&mjit_worker_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
+    native_cond_initialize(&mjit_gc_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
 
     /* Initialize worker thread */
     finish_worker_p = FALSE;
@@ -860,10 +854,10 @@ mjit_init(struct mjit_options *opts)
     } else {
 	mjit_init_p = FALSE;
 	native_mutex_destroy(&mjit_engine_mutex);
-	pthread_cond_destroy(&mjit_pch_wakeup);
-	pthread_cond_destroy(&mjit_client_wakeup);
-	pthread_cond_destroy(&mjit_worker_wakeup);
-	pthread_cond_destroy(&mjit_gc_wakeup);
+	native_cond_destroy(&mjit_pch_wakeup);
+	native_cond_destroy(&mjit_client_wakeup);
+	native_cond_destroy(&mjit_worker_wakeup);
+	native_cond_destroy(&mjit_gc_wakeup);
 	verbose(1, "Failure in MJIT thread initialization\n");
     }
 }
@@ -887,7 +881,7 @@ mjit_finish()
        absence.  So wait for a clean finish of the threads.  */
     while (pch_status == PCH_NOT_READY) {
 	verbose(3, "Waiting wakeup from make_pch");
-	pthread_cond_wait(&mjit_pch_wakeup, &mjit_engine_mutex);
+	native_cond_wait(&mjit_pch_wakeup, &mjit_engine_mutex);
     }
     CRITICAL_SECTION_FINISH(3, "in mjit_finish to wakeup from pch");
 
@@ -896,17 +890,15 @@ mjit_finish()
     while (!worker_finished) {
 	verbose(3, "Sending cancel signal to workers");
 	CRITICAL_SECTION_START(3, "in mjit_finish");
-	if (pthread_cond_broadcast(&mjit_worker_wakeup) != 0) {
-	    fprintf(stderr, "Cannot send wakeup signal to workers in mjit_finish\n");
-	}
+	native_cond_broadcast(&mjit_worker_wakeup);
 	CRITICAL_SECTION_FINISH(3, "in mjit_finish");
     }
 
     native_mutex_destroy(&mjit_engine_mutex);
-    pthread_cond_destroy(&mjit_pch_wakeup);
-    pthread_cond_destroy(&mjit_client_wakeup);
-    pthread_cond_destroy(&mjit_worker_wakeup);
-    pthread_cond_destroy(&mjit_gc_wakeup);
+    native_cond_destroy(&mjit_pch_wakeup);
+    native_cond_destroy(&mjit_client_wakeup);
+    native_cond_destroy(&mjit_worker_wakeup);
+    native_cond_destroy(&mjit_gc_wakeup);
 
     /* cleanup temps */
     if (!mjit_opts.save_temps)

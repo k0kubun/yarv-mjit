@@ -39,11 +39,11 @@ void native_mutex_unlock(rb_nativethread_lock_t *lock);
 static int native_mutex_trylock(rb_nativethread_lock_t *lock);
 void native_mutex_initialize(rb_nativethread_lock_t *lock);
 void native_mutex_destroy(rb_nativethread_lock_t *lock);
-static void native_cond_signal(rb_nativethread_cond_t *cond);
-static void native_cond_broadcast(rb_nativethread_cond_t *cond);
-static void native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex);
-static void native_cond_initialize(rb_nativethread_cond_t *cond, int flags);
-static void native_cond_destroy(rb_nativethread_cond_t *cond);
+void native_cond_signal(rb_nativethread_cond_t *cond);
+void native_cond_broadcast(rb_nativethread_cond_t *cond);
+void native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex);
+void native_cond_initialize(rb_nativethread_cond_t *cond, int flags);
+void native_cond_destroy(rb_nativethread_cond_t *cond);
 static void rb_thread_wakeup_timer_thread_low(void);
 static struct {
     pthread_t id;
@@ -258,7 +258,7 @@ native_mutex_destroy(pthread_mutex_t *lock)
     }
 }
 
-static void
+void
 native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
 {
 #ifdef HAVE_PTHREAD_COND_INIT
@@ -289,7 +289,7 @@ native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
 #endif
 }
 
-static void
+void
 native_cond_destroy(rb_nativethread_cond_t *cond)
 {
 #ifdef HAVE_PTHREAD_COND_INIT
@@ -310,7 +310,7 @@ native_cond_destroy(rb_nativethread_cond_t *cond)
  * need to retrying until pthread functions don't return EAGAIN.
  */
 
-static void
+void
 native_cond_signal(rb_nativethread_cond_t *cond)
 {
     int r;
@@ -322,7 +322,7 @@ native_cond_signal(rb_nativethread_cond_t *cond)
     }
 }
 
-static void
+void
 native_cond_broadcast(rb_nativethread_cond_t *cond)
 {
     int r;
@@ -334,7 +334,7 @@ native_cond_broadcast(rb_nativethread_cond_t *cond)
     }
 }
 
-static void
+void
 native_cond_wait(rb_nativethread_cond_t *cond, pthread_mutex_t *mutex)
 {
     int r = pthread_cond_wait(&cond->cond, mutex);
