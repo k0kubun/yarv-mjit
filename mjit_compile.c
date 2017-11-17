@@ -449,20 +449,12 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 		b->stack_size-1, operands[0], operands[1], operands[2], b->stack_size-1);
         break;
       case YARVINSN_checkmatch:
-	fprintf(f, "  stack[%d] = vm_check_match(stack[%d], stack[%d], 0x%"PRIxVALUE");\n", b->stack_size-2, b->stack_size-2, b->stack_size-1, operands[0]);
+	fprintf(f, "  stack[%d] = vm_check_match(ec, stack[%d], stack[%d], 0x%"PRIxVALUE");\n", b->stack_size-2, b->stack_size-2, b->stack_size-1, operands[0]);
 	b->stack_size--;
         break;
       case YARVINSN_checkkeyword:
 	fprintf(f, "  stack[%d] = vm_check_keyword(0x%"PRIxVALUE", 0x%"PRIxVALUE", cfp->ep);\n",
 		b->stack_size++, operands[0], operands[1]);
-        break;
-      case YARVINSN_trace:
-	fprintf(f, "  vm_dtrace((rb_event_flag_t)0x%"PRIxVALUE", ec);\n", operands[0]);
-	if ((rb_event_flag_t)operands[0] & (RUBY_EVENT_RETURN | RUBY_EVENT_B_RETURN)) {
-	    fprintf(f, "  EXEC_EVENT_HOOK(ec, (rb_event_flag_t)0x%"PRIxVALUE", cfp->self, 0, 0, 0, stack[%d]);\n", operands[0], b->stack_size-1);
-	} else {
-	    fprintf(f, "  EXEC_EVENT_HOOK(ec, (rb_event_flag_t)0x%"PRIxVALUE", cfp->self, 0, 0, 0, Qundef);\n", operands[0]);
-	}
         break;
       case YARVINSN_trace2:
 	fprintf(f, "  vm_dtrace((rb_event_flag_t)0x%"PRIxVALUE", ec);\n", operands[0]);

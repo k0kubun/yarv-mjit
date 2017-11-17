@@ -176,7 +176,6 @@ class TestCompile < Test::Unit::TestCase
     insns = %w[
       nop
       putnil
-      trace
       leave
       checkmatch
       throw
