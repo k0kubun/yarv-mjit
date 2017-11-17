@@ -59,14 +59,14 @@ Note: Base revision of YARV-MJIT is newer than 2.5.0-preview1.
   - rtl - Vladimir's latest RTL MJIT ([21bbbd3](https://github.com/vnmakarov/ruby/commit/21bbbd37b5d9f86910f7679a584bbbfb9dc9c9b1)) without `-j` option
   - rtl-mjit - MJIT (`-j`) with GCC 5.4.0 with -O2
   - rtl-mjit-cl - MJIT (`-j:l`) using LLVM Clang 3.8.0 with -O2
-  - yarv - k0kubun's YARV-MJIT without `-j` option, mostly same as v2.5
+  - yarv - k0kubun's YARV-MJIT without `-j` option, mostly same as trunk
   - yarv-mjit - k0kubun's YARV-MJIT (`-j`) with GCC 5.4.0 with -O2
   - yarv-mjit-cl - YARV-MJIT (`-j`) with LLVM Clang 3.8.0 with -O2
 
 |   | v2 | v2.5 | rtl | rtl-mjit | rtl-mjit-cl | yarv | yarv-mjit | yarv-mjit-cl |
 |:--|:---|:-----|:----|:---------|:------------|:-----|:----------|:-------------|
-|FPS|35.41|43.36|38.00|75.57     | 81.25       | 42.89| 62.09     | 55.67        |
-|Speedup|1.0|1.22|1.07|2.13      | 2.29        | 1.21 | 1.75      | 1.57         |
+|FPS|35.41|43.36|38.00|75.57     | 81.25       | 45.76| 68.73     | 58.84        |
+|Speedup|1.0|1.22|1.07|2.13      | 2.29        | 1.29 | 1.94      | 1.66         |
 
 
 ### Other benchmarks
