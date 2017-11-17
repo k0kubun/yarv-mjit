@@ -875,7 +875,7 @@ rb_proc_create(VALUE klass, const struct rb_block *block,
     return procval;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_vm_make_proc_lambda(const rb_execution_context_t *ec, const struct rb_captured_block *captured, VALUE klass, int8_t is_lambda)
 {
     VALUE procval;
