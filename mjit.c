@@ -823,6 +823,14 @@ mjit_init(struct mjit_options *opts)
     mjit_opts = *opts;
     mjit_init_p = TRUE;
 
+#ifdef __MACH__
+    if (!mjit_opts.llvm) {
+	if (mjit_opts.warnings || mjit_opts.verbose)
+	    fprintf(stderr, "MJIT warning: we use only clang on Mac OS X\n");
+	mjit_opts.llvm = 1;
+    }
+#endif
+
     /* Initialize variables for compilation */
     pch_status = PCH_NOT_READY;
     cc_path = mjit_opts.llvm ? LLVM_PATH : GCC_PATH;
