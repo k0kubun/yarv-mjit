@@ -9,6 +9,7 @@
 #include "internal.h"
 #include "vm_core.h"
 #include "vm_exec.h"
+#include "vm_insnhelper.h"
 #include "mjit.h"
 #include "insns.inc"
 #include "insns_info.inc"
@@ -70,7 +71,7 @@ extern int simple_iseq_p(const rb_iseq_t *iseq);
 static int
 inlinable_cfunc_p(CALL_CACHE cc)
 {
-    return cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
+    return GET_GLOBAL_METHOD_STATE() == cc->method_state && cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
 }
 
 /* TODO: move to somewhere shared with vm_args.c */
@@ -82,7 +83,8 @@ static const rb_iseq_t *
 inlinable_iseq(CALL_INFO ci, CALL_CACHE cc)
 {
     const rb_iseq_t *iseq;
-    if (cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
+    if (GET_GLOBAL_METHOD_STATE() == cc->method_state
+	&& cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
 	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr)) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
 	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)) /* CI_SET_FASTPATH */) {
 	return iseq;
