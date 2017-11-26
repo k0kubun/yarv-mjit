@@ -146,10 +146,12 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
 
     if (inlinable_cfunc_p(cc) || inlinable_iseq(ci, cc)) {
 	fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
-	fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
-	fprintf(f, "    goto cancel;\n");
-	fprintf(f, "  }\n");
+    } else {
+	fprintf(f, "  if (UNLIKELY(GET_GLOBAL_METHOD_STATE() != ((CALL_CACHE)0x%"PRIxVALUE")->method_state)) {\n", cc);
     }
+    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
+    fprintf(f, "    goto cancel;\n");
+    fprintf(f, "  }\n");
 
     fprintf(f, "  {\n");
     fprintf(f, "    struct rb_calling_info calling;\n");
