@@ -797,6 +797,17 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
     if (body->stack_max > 0) {
 	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
     }
+    if (body->param.flags.has_opt) {
+	int i;
+	fprintf(f, "\n");
+	fprintf(f, "  switch (cfp->pc - cfp->iseq->body->iseq_encoded) {\n");
+	for (i = 0; i <= body->param.opt_num; i++) {
+	    VALUE pc_offset = body->param.opt_table[i];
+	    fprintf(f, "    case %"PRIdVALUE":\n", pc_offset);
+	    fprintf(f, "      goto label_%"PRIdVALUE";\n", pc_offset);
+	}
+	fprintf(f, "  }\n");
+    }
     compile_insns(f, body, 0, 0, &status);
     compile_cancel_handler(f, body);
     fprintf(f, "}\n");
