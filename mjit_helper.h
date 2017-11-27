@@ -15,6 +15,12 @@ mjit_check_invalid_cc(VALUE obj, rb_serial_t method_state, rb_serial_t class_ser
     return GET_GLOBAL_METHOD_STATE() != method_state || RCLASS_SERIAL(CLASS_OF(obj)) != class_serial;
 }
 
+static inline int
+mjit_check_invalid_cc_ptr(VALUE obj, CALL_CACHE cc)
+{
+    return GET_GLOBAL_METHOD_STATE() != cc->method_state || RCLASS_SERIAL(CLASS_OF(obj)) != cc->class_serial;
+}
+
 static inline VALUE
 mjit_call_cfunc_with_frame(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, const rb_callable_method_entry_t *me)
 {
