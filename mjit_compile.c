@@ -101,34 +101,44 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 {
     const rb_iseq_t *iseq;
     CALL_CACHE cc = (CALL_CACHE)cc_v;
-
-    if (inlinable_cfunc_p(cc)) {
-	fprintf(f, "    stack[%d] = mjit_call_cfunc(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, (VALUE)cc->me);
-	return;
-    }
+    int cfunc_p;
 
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
+    if (cfunc_p = inlinable_cfunc_p(cc)) {
+	fprintf(f, "      if (LIKELY(inlinable)) {\n");
+	fprintf(f, "        stack[%d] = mjit_call_cfunc(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", result_pos, ci_v, (VALUE)cc->me);
     /* In the condition that CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup, this inlines vm_call_iseq_setup_normal */
-    if (iseq = inlinable_iseq((CALL_INFO)ci_v, cc)) {
+    } else if (iseq = inlinable_iseq((CALL_INFO)ci_v, cc)) {
 	/* TODO: check calling->argc for argument_arity_error */
 	int param_size = iseq->body->param.size;
-	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
-	fprintf(f, "      cfp->sp = argv - 1;\n"); /* recv */
-	fprintf(f, "      vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
+	fprintf(f, "      if (LIKELY(inlinable)) {\n");
+	fprintf(f, "        VALUE *argv = cfp->sp - calling.argc;\n");
+	fprintf(f, "        cfp->sp = argv - 1;\n"); /* recv */
+	fprintf(f, "        vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
 		"calling.block_handler, 0x%"PRIxVALUE", 0x%"PRIxVALUE", argv + %d, %d, %d);\n",
 		(VALUE)iseq, (VALUE)cc->me, (VALUE)iseq->body->iseq_encoded, param_size, iseq->body->local_table_size - param_size, iseq->body->stack_max);
-	fprintf(f, "      v = Qundef;\n");
-    } else {
-	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+	fprintf(f, "        v = Qundef;\n");
     }
 
-    fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n"); /* TODO: we need some check to call `mjit_exec` directly (skipping setjmp), but not done yet */
-    fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
-    fprintf(f, "        stack[%d] = vm_exec(ec);\n", result_pos);
-    fprintf(f, "      } else {\n");
-    fprintf(f, "        stack[%d] = v;\n", result_pos);
+    if (cfunc_p || iseq) {
+	fprintf(f, "      } else {\n  ");
+    }
+    fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+    if (iseq) {
+	fprintf(f, "      }\n");
+    }
+    if (!cfunc_p) {
+	fprintf(f, "      {\n");
+    }
+
+    fprintf(f, "        if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n"); /* TODO: we need some check to call `mjit_exec` directly (skipping setjmp), but not done yet */
+    fprintf(f, "          VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
+    fprintf(f, "          stack[%d] = vm_exec(ec);\n", result_pos);
+    fprintf(f, "        } else {\n");
+    fprintf(f, "          stack[%d] = v;\n", result_pos);
+    fprintf(f, "        }\n");
     fprintf(f, "      }\n");
     fprintf(f, "    }\n");
 }
@@ -144,15 +154,21 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
     }
 
-    if (inlinable_cfunc_p(cc) || inlinable_iseq(ci, cc)) {
-	fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
-	fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
-	fprintf(f, "    goto cancel;\n");
-	fprintf(f, "  }\n");
-    }
-
     fprintf(f, "  {\n");
     fprintf(f, "    struct rb_calling_info calling;\n");
+
+    if (inlinable_cfunc_p(cc) || inlinable_iseq(ci, cc)) {
+	fprintf(f, "    int inlinable = 1;\n");
+	fprintf(f, "    if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
+	fprintf(f, "      if (UNLIKELY(mjit_check_invalid_cc_ptr(stack[%d], %llu))) {\n", stack_size - 1 - argc, cc);
+	fprintf(f, "        cfp->sp = cfp->bp + %d;\n", stack_size + 1);
+	fprintf(f, "        goto cancel;\n");
+	fprintf(f, "      } else {\n");
+	fprintf(f, "        inlinable = 0;\n");
+	fprintf(f, "      }\n");
+	fprintf(f, "    }\n");
+    }
+
     fprint_args(f, argc + 1, stack_size - argc - 1); /* +1 is for recv */
     if (with_block) {
 	fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
