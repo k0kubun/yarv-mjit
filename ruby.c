@@ -1115,7 +1115,6 @@ proc_options(long argc, char **argv, ruby_cmdline_options_t *opt, int envopt)
 	    break;
 
 	  case 'j':
-	    if (envopt) goto noenvopt;
 	    setup_mjit_options(s + 1, &opt->mjit);
 	    break;
 
