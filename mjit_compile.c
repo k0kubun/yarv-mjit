@@ -124,7 +124,7 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
     }
 
-    fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n"); /* TODO: we need some check to call `mjit_exec` directly (skipping setjmp), but not done yet */
+    fprintf(f, "      if (v == Qundef) {\n");
     fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
     fprintf(f, "        stack[%d] = vm_exec(ec);\n", result_pos);
     fprintf(f, "      } else {\n");
