@@ -131,7 +131,13 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
     }
 
-    fprintf(f, "      if (v == Qundef) {\n");
+    if (iseq && iseq->body->catch_table == NULL) {
+	/* TODO: Probably it's better to discard this code if method is changed */
+	fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n");
+    } else {
+	/* When catch table exists, we want to call setjmp and use vm_exec's fallback handler. */
+	fprintf(f, "      if (v == Qundef) {\n");
+    }
     fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
     fprintf(f, "        stack[%d] = vm_exec(ec);\n", result_pos);
     fprintf(f, "      } else {\n");
