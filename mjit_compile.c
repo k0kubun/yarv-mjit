@@ -74,23 +74,29 @@ inlinable_cfunc_p(CALL_CACHE cc)
     return GET_GLOBAL_METHOD_STATE() == cc->method_state && cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
 }
 
+/* Returns iseq from cc if it's available and still not obsoleted. */
+static const rb_iseq_t *
+get_iseq_if_available(CALL_CACHE cc)
+{
+    if (GET_GLOBAL_METHOD_STATE() == cc->method_state
+	&& cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ) {
+	return rb_iseq_check(cc->me->def->body.iseq.iseqptr);
+    }
+    return NULL;
+}
+
 /* TODO: move to somewhere shared with vm_args.c */
 #define IS_ARGS_SPLAT(ci)   ((ci)->flag & VM_CALL_ARGS_SPLAT)
 #define IS_ARGS_KEYWORD(ci) ((ci)->flag & VM_CALL_KWARG)
 
-/* return iseq pointer if inlinable, otherwise NULL. */
-static const rb_iseq_t *
-inlinable_iseq(CALL_INFO ci, CALL_CACHE cc)
+/* Returns TRUE if iseq is inlinable, otherwise NULL. This becomes TRUE in the same condition
+   as CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup. */
+static int
+inlinable_iseq_p(CALL_INFO ci, CALL_CACHE cc, const rb_iseq_t *iseq)
 {
-    const rb_iseq_t *iseq;
-    if (GET_GLOBAL_METHOD_STATE() == cc->method_state
-	&& cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ
-	&& simple_iseq_p(iseq = rb_iseq_check(cc->me->def->body.iseq.iseqptr)) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
-	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)) /* CI_SET_FASTPATH */) {
-	return iseq;
-    } else {
-	return NULL;
-    }
+    return iseq != NULL
+	&& simple_iseq_p(iseq) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
+	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)); /* CI_SET_FASTPATH */
 }
 
 /* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`.
@@ -110,8 +116,9 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
+    iseq = get_iseq_if_available(cc);
     /* In the condition that CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup, this inlines vm_call_iseq_setup_normal */
-    if (iseq = inlinable_iseq((CALL_INFO)ci_v, cc)) {
+    if (inlinable_iseq_p((CALL_INFO)ci_v, cc, iseq)) {
 	/* TODO: check calling->argc for argument_arity_error */
 	int param_size = iseq->body->param.size;
 	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
@@ -144,7 +151,7 @@ compile_send(FILE *f, const VALUE *operands, unsigned int stack_size, int with_b
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
     }
 
-    if (inlinable_cfunc_p(cc) || inlinable_iseq(ci, cc)) {
+    if (inlinable_cfunc_p(cc) || inlinable_iseq_p(ci, cc, get_iseq_if_available(cc))) {
 	fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], %llu, %llu))) {\n", stack_size - 1 - argc, cc->method_state, cc->class_serial);
     } else {
 	fprintf(f, "  if (UNLIKELY(GET_GLOBAL_METHOD_STATE() != ((CALL_CACHE)0x%"PRIxVALUE")->method_state)) {\n", (VALUE)cc);
