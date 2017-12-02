@@ -72,7 +72,6 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <windows.h>
-#include <pthread.h>
 #else
 #include <sys/wait.h>
 #include <sys/time.h>
@@ -93,6 +92,8 @@ extern void native_cond_destroy(rb_nativethread_cond_t *cond);
 extern void native_cond_signal(rb_nativethread_cond_t *cond);
 extern void native_cond_broadcast(rb_nativethread_cond_t *cond);
 extern void native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex);
+
+extern int rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_func)(void));
 
 #define RB_CONDATTR_CLOCK_MONOTONIC 1
 
@@ -682,15 +683,11 @@ static int finish_worker_p;
 static int worker_finished;
 
 /* The function implementing a worker. It is executed in a separate
-   thread started by pthread_create. It compiles precompiled header
+   thread by rb_thread_create_mjit_thread. It compiles precompiled header
    and then compiles requested ISeqs. */
-static void *
-worker(void *arg)
+static void
+worker()
 {
-    if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL) != 0) {
-	fprintf(stderr, "Cannot enable cancelation in MJIT worker\n");
-    }
-
     make_pch();
     if (pch_status == PCH_FAILED) {
 	mjit_init_p = FALSE;
@@ -699,7 +696,7 @@ worker(void *arg)
 	verbose(3, "Sending wakeup signal to client in a mjit-worker");
 	native_cond_signal(&mjit_client_wakeup);
 	CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
-	return NULL;
+	return;
     }
 
     /* main worker loop */
@@ -731,7 +728,6 @@ worker(void *arg)
     CRITICAL_SECTION_START(3, "in the end of worker to update worker_finished");
     worker_finished = TRUE;
     CRITICAL_SECTION_FINISH(3, "in the end of worker to update worker_finished");
-    return NULL;
 }
 
 /* Create unit for ISEQ. */
@@ -830,9 +826,6 @@ child_after_fork(void)
 void
 mjit_init(struct mjit_options *opts)
 {
-    pthread_attr_t attr;
-    pthread_t worker_pid;
-
     mjit_opts = *opts;
     mjit_init_p = TRUE;
 
@@ -872,13 +865,7 @@ mjit_init(struct mjit_options *opts)
     /* Initialize worker thread */
     finish_worker_p = FALSE;
     worker_finished = FALSE;
-    pthread_atfork(NULL, NULL, child_after_fork);
-    if (pthread_attr_init(&attr) == 0
-	&& pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM) == 0
-	&& pthread_create(&worker_pid, &attr, worker, NULL) == 0) {
-	/* jit_worker thread is not to be joined */
-	pthread_detach(worker_pid);
-    } else {
+    if (rb_thread_create_mjit_thread(child_after_fork, worker) == FALSE) {
 	mjit_init_p = FALSE;
 	native_mutex_destroy(&mjit_engine_mutex);
 	native_cond_destroy(&mjit_pch_wakeup);
