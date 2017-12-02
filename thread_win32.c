@@ -777,4 +777,37 @@ native_set_thread_name(rb_thread_t *th)
 {
 }
 
+#include <pthread.h>
+
+/* A function that wraps actual worker function, for pthread abstraction. */
+static void *
+mjit_worker(void *arg)
+{
+    void (*worker_func)(void) = arg;
+
+    if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL) != 0) {
+	fprintf(stderr, "Cannot enable cancelation in MJIT worker\n");
+    }
+    worker_func();
+}
+
+/* Launch MJIT thread. Returns FALSE if it fails to create thread. */
+int
+rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_func)(void))
+{
+    pthread_attr_t attr;
+    pthread_t worker_pid;
+
+    pthread_atfork(NULL, NULL, child_hook);
+    if (pthread_attr_init(&attr) == 0
+	&& pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM) == 0
+	&& pthread_create(&worker_pid, &attr, mjit_worker, worker_func) == 0) {
+	/* jit_worker thread is not to be joined */
+	pthread_detach(worker_pid);
+	return TRUE;
+    } else {
+	return FALSE;
+    }
+}
+
 #endif /* THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION */
