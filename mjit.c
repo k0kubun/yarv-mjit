@@ -159,7 +159,7 @@ static char *header_file;
 /* Name of the precompiled header file.  */
 static char *pch_file;
 /* Ruby level interface module.  */
-VALUE rb_mMJit;
+VALUE rb_mMJIT;
 
 /* Return time in milliseconds as a double.  */
 static double
@@ -946,8 +946,8 @@ mjit_enable_get(void)
 }
 
 void
-Init_MJit(void)
+Init_MJIT(void)
 {
-    rb_mMJit = rb_define_module("MJit");
-    rb_define_singleton_method(rb_mMJit, "enabled?", mjit_enable_get, 0);
+    rb_mMJIT = rb_define_module("MJIT");
+    rb_define_singleton_method(rb_mMJIT, "enabled?", mjit_enable_get, 0);
 }

@@ -61,6 +61,6 @@ rb_call_inits(void)
     CALL(Complex);
     CALL(version);
     CALL(vm_trace);
-    CALL(MJit);
+    CALL(MJIT);
 }
 #undef CALL
