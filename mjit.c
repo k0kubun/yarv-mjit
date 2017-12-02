@@ -436,8 +436,10 @@ get_from_unit_queue()
 
     /* Find iseq with max total_calls */
     for (unit = unit_queue; unit != NULL; unit = unit ? unit->next : NULL) {
-	if (unit->iseq == NULL) {
-	    continue; /* TODO: GCed. remove from queue and free */
+	if (unit->iseq == NULL) { /* ISeq is GCed. */
+	    remove_from_unit_queue(unit);
+	    free(unit);
+	    continue;
 	}
 
 	if (dequeued == NULL || dequeued->iseq->body->total_calls < unit->iseq->body->total_calls) {
