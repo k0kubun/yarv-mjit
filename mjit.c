@@ -107,6 +107,7 @@ extern int rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_
 #define WIFEXITED(S) ((S) != STILL_ACTIVE)
 #define WEXITSTATUS(S) (S)
 #define WIFSIGNALED(S) (0)
+typedef intptr_t pid_t;
 #endif
 
 /* A copy of MJIT portion of MRI options since MJIT initialization.  We
@@ -265,7 +266,7 @@ form_args(int num, ...)
 /* Start an OS process of executable PATH with arguments ARGV.  Return
    PID of the process.  */
 static pid_t
-start_process(const char *path, char *const argv[])
+start_process(const char *path, char *const *argv)
 {
     pid_t pid;
 
