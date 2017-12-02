@@ -158,6 +158,8 @@ static const char *cc_path;
 static char *header_file;
 /* Name of the precompiled header file.  */
 static char *pch_file;
+/* Ruby level interface module.  */
+VALUE rb_mMJit;
 
 /* Return time in milliseconds as a double.  */
 static double
@@ -935,4 +937,17 @@ mjit_finish()
 
     mjit_init_p = FALSE;
     verbose(1, "Successful MJIT finish");
+}
+
+VALUE
+mjit_enable_get(void)
+{
+  return mjit_init_p ? Qtrue : Qfalse;
+}
+
+void
+Init_MJit(void)
+{
+    rb_mMJit = rb_define_module("MJit");
+    rb_define_singleton_method(rb_mMJit, "enabled?", mjit_enable_get, 0);
 }
