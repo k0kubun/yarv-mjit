@@ -76,5 +76,4 @@ Note: Base revision of YARV-MJIT is newer than 2.5.0-preview1.
 
 - Support Windows
 - Fix bugs in JIT-ed code, and pass tests with `-j`
-- Inline core functions especially around method call
-- Inline Ruby method
+- Inline Ruby method and one written in C
