@@ -130,8 +130,10 @@ int mjit_init_p = FALSE;
 /* Priority queue of iseqs waiting for JIT compilation.
    This variable is a pointer to head unit of the queue. */
 static struct rb_mjit_unit *unit_queue;
-/* The number of so far processed ISEQs.  */
+/* The number of so far processed ISEQs, used to generate unique id.  */
 static int current_unit_num;
+/* The number of successfully compiled ISEQs.  */
+static int active_unit_num;
 /* A mutex for conitionals and critical sections.  */
 static rb_nativethread_lock_t mjit_engine_mutex;
 /* A thread conditional to wake up `mjit_finish` at the end of PCH thread.  */
@@ -661,6 +663,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 
     if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
 	CRITICAL_SECTION_START(3, "end of jit");
+	active_unit_num++;
 	if (unit->iseq)
 	    verbose(1, "JIT success (%.1fms): %s@%s:%d -> %s", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
 		    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
@@ -701,7 +704,7 @@ worker(void *arg)
 
 	/* wait until unit is available */
 	CRITICAL_SECTION_START(3, "in worker dequeue");
-	while (unit_queue == NULL && !finish_worker_p) {
+	while ((unit_queue == NULL || active_unit_num > mjit_opts.max_cache_size) && !finish_worker_p) {
 	    native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
 	    verbose(3, "Getting wakeup from client");
 	}
@@ -811,6 +814,12 @@ child_after_fork(void)
     /* TODO: Should we initiate MJIT in the forked Ruby.  */
 }
 
+/* Default permitted number of units with a JIT code kept in
+   memory.  */
+#define DEFAULT_CACHE_SIZE 1000
+/* Minimum value for JIT cache size.  */
+#define MIN_CACHE_SIZE 10
+
 /* Initialize MJIT.  Start a thread creating the precompiled header and
    processing ISeqs.  The function should be called first for using MJIT.
    If everything is successfull, MJIT_INIT_P will be TRUE.  */
@@ -822,6 +831,12 @@ mjit_init(struct mjit_options *opts)
 
     mjit_opts = *opts;
     mjit_init_p = TRUE;
+
+    /* Normalize options */
+    if (mjit_opts.max_cache_size <= 0)
+	mjit_opts.max_cache_size = DEFAULT_CACHE_SIZE;
+    if (mjit_opts.max_cache_size < MIN_CACHE_SIZE)
+	mjit_opts.max_cache_size = MIN_CACHE_SIZE;
 
 #ifdef __MACH__
     if (!mjit_opts.llvm) {
