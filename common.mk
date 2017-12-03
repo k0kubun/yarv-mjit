@@ -957,11 +957,11 @@ vm_call_iseq_optimized.inc: $(srcdir)/tool/mk_call_iseq_optimized.rb
 rb_mjit_header.h: PHONY probes.h
 	@$(ECHO) building $@
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER $(srcdir)/vm.c $(COUTFLAG) $@.new -E -dD
-	@cmp $@.new $@ > /dev/null 2>&1 && echo $@ unchanged && rm $@.new && exit 0; mv $@.new $@
+	$(Q) @cmp $@.new $@ && echo $@ unchanged && rm $@.new && exit 0; mv $@.new $@
 
 rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h: rb_mjit_header.h $(srcdir)/tool/minimize_mjit_header.rb
 	@$(ECHO) building $@
-	$(BASERUBY) $(srcdir)/tool/minimize_mjit_header.rb $(CC) rb_mjit_header.h > $@.new && mv $@.new $@
+	$(BASERUBY) $(srcdir)/tool/minimize_mjit_header.rb $(CC) rb_mjit_header.h $@.new && mv $@.new $@
 
 $(MINIPRELUDE_C): $(COMPILE_PRELUDE)
 	$(ECHO) generating $@

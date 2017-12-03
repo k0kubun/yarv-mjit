@@ -74,21 +74,22 @@ module MJITHeader
   end
 end
 
-if ARGV.size != 2
-  STDERR.puts 'Usage: <c-compiler> <header file> > out'
+if ARGV.size != 3
+  STDERR.puts 'Usage: <c-compiler> <header file> <out>'
   exit 1
 end
 
-cc     = ARGV[0]
-code   = File.read(ARGV[1]) # Current version of the header file.
-cflags = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
+cc      = ARGV[0]
+code    = File.read(ARGV[1]) # Current version of the header file.
+outfile = ARGV[2]
+cflags  = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
 
 MJITHeader.remove_bad_macros!(code)
 
 # Check initial file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'initial')
 if RUBY_PLATFORM =~ /mingw/ # transformation is broken on MinGW for now
-  puts code
+  File.write(outfile, code)
   exit 0
 end
 
@@ -128,4 +129,4 @@ end
 # Check the final file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'final')
 
-puts code # Output the result
+File.write(outfile, code)
