@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+return if RUBY_PLATFORM =~ /mswin|mingw/
 require 'test/unit'
 
 class TestCompile < Test::Unit::TestCase
