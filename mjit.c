@@ -469,6 +469,9 @@ static const char *GCC_COMMON_ARGS[] = {"gcc", "-O2", "-Wfatal-errors", "-fPIC",
 static const char *GCC_USE_PCH_ARGS[] = {"-I/tmp", NULL};
 static const char *GCC_EMIT_PCH_ARGS[] = {NULL};
 
+static const char *CL_COMMON_ARGS_DEBUG[] = {"cl", "-nologo", "-O0", "/I", ".", NULL};
+static const char *CL_COMMON_ARGS[] = {"cl", "-nologo", "-O2", "/I", ".", NULL};
+
 #ifdef __MACH__
 
 static const char *CLANG_COMMON_ARGS_DEBUG[] = {"clang", "-O0", "-g", "-dynamic", "-I/usr/local/include", "-L/usr/local/lib", "-w", "-bundle", NULL};
@@ -554,6 +557,17 @@ compile_c_to_so(const char *c_file, const char *so_file)
 	CLANG_USE_PCH_ARGS[1] = pch_file;
 	args = form_args(5, (mjit_opts.debug ? CLANG_COMMON_ARGS_DEBUG : CLANG_COMMON_ARGS),
 			 CLANG_USE_PCH_ARGS, input, output, libs);
+    } else if (mjit_opts.cc == MJIT_CC_CL) {
+	char *out = xmalloc(strlen(so_file) + 4);
+	if (out == NULL)
+	    return FALSE;
+	strcpy(out, "/Fo");
+	strcat(out, so_file);
+
+	output[0] = "/LD";
+	output[1] = out;
+	args = form_args(3, (mjit_opts.debug ? CL_COMMON_ARGS_DEBUG : CL_COMMON_ARGS),
+			 input, output);
     } else {
 	args = form_args(5, (mjit_opts.debug ? GCC_COMMON_ARGS_DEBUG : GCC_COMMON_ARGS),
 			 GCC_USE_PCH_ARGS, input, output, libs);
@@ -602,11 +616,20 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     sprintf(funcname, "_mjit%d", unit->id);
 
     f = fopen(c_file, "w");
-    if (mjit_opts.cc != MJIT_CC_CLANG) { /* -include-pch is used for Clang */
-	const char *s;
+    /* -include-pch is used for Clang */
+    if (mjit_opts.cc == MJIT_CC_GCC || mjit_opts.cc == MJIT_CC_CL) {
+	const char *s, *suffix;
+	if (mjit_opts.cc == MJIT_CC_CL) {
+	    s = header_file;
+	    suffix = ".h";
+	} else {
+	    s = pch_file;
+	    suffix = ".gch";
+	}
+
 	fprintf(f, "#include \"");
 	/* print pch_file except .gch */
-	for (s = pch_file; strcmp(s, ".gch") != 0; s++) {
+	for (; strcmp(s, suffix) != 0; s++) {
 	    switch(*s) {
 	      case '\\':
 		fprintf(f, "\\%c", *s);
@@ -615,6 +638,8 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 		fprintf(f, "%c", *s);
 	    }
 	}
+	if (mjit_opts.cc == MJIT_CC_CL)
+	    fprintf(f, suffix);
 	fprintf(f, "\"\n");
     }
 
@@ -689,15 +714,18 @@ static int worker_finished;
 static void
 worker()
 {
-    make_pch();
-    if (pch_status == PCH_FAILED) {
-	mjit_init_p = FALSE;
-	CRITICAL_SECTION_START(3, "in worker to update worker_finished");
-	worker_finished = TRUE;
-	verbose(3, "Sending wakeup signal to client in a mjit-worker");
-	native_cond_signal(&mjit_client_wakeup);
-	CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
-	return;
+    /* TODO: support precompiled header of cl.exe using /Yc and /Fp */
+    if (mjit_opts.cc != MJIT_CC_CL) {
+	make_pch();
+	if (pch_status == PCH_FAILED) {
+	    mjit_init_p = FALSE;
+	    CRITICAL_SECTION_START(3, "in worker to update worker_finished");
+	    worker_finished = TRUE;
+	    verbose(3, "Sending wakeup signal to client in a mjit-worker");
+	    native_cond_signal(&mjit_client_wakeup);
+	    CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
+	    return;
+	}
     }
 
     /* main worker loop */
@@ -840,13 +868,13 @@ mjit_init(struct mjit_options *opts)
     if (mjit_opts.cc == MJIT_CC_DEFAULT) {
 #if defined(_WIN32)
 	mjit_opts.cc = MJIT_CC_CL;
-	verbose(1, "CC defaults to cl\n");
+	verbose(1, "MJIT: CC defaults to cl\n");
 #elif defined(__MACH__)
 	mjit_opts.cc = MJIT_CC_CLANG;
-	verbose(1, "CC defaults to clang\n");
+	verbose(1, "MJIT: CC defaults to clang\n");
 #else
 	mjit_opts.cc = MJIT_CC_GCC;
-	verbose(1, "CC defaults to gcc\n");
+	verbose(1, "MJIT: CC defaults to gcc\n");
 #endif
     }
 
