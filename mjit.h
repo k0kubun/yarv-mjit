@@ -25,11 +25,23 @@ enum rb_mjit_iseq_func {
     LAST_JIT_ISEQ_FUNC = 3,
 };
 
+/* C compiler used to generate native code. */
+enum rb_mjit_cc {
+    /* Not selected */
+    MJIT_CC_DEFAULT = 0,
+    /* GNU Compiler Collection */
+    MJIT_CC_GCC = 1,
+    /* LLVM/Clang */
+    MJIT_CC_CLANG = 2,
+    /* Visual Studio cl.exe */
+    MJIT_CC_CL = 3,
+};
+
 /* MJIT options which can be defined on the MRI command line.  */
 struct mjit_options {
     char on; /* flag of MJIT usage  */
-    /* Flag to use LLVM Clang instead of default GCC for MJIT . */
-    char llvm;
+    /* Default: clang for macOS, cl for Windows, gcc for others. */
+    enum rb_mjit_cc cc;
     /* Save temporary files after MRI finish.  The temporary files
        include the pre-compiled header, C code file generated for ISEQ,
        and the corresponding object file.  */

@@ -269,7 +269,7 @@ usage(const char *name, int help)
     };
     static const struct message mjit_options[] = {
 	M("s",     ", save-temps",     "Save MJIT temporary files in /tmp"),
-	M("l",     ", llvm",           "Use LLVM clang instead of GCC"), /* TODO: change to -j:c=gcc, -j:c=clang, ... */
+	M("c",     ", cc",             "C compiler to generate native code (gcc, clang, cl)"),
 	M("w",     ", warnings",       "Enable printing MJIT warnings"),
 	M("d",     ", debug",          "Enable MJIT debugging (very slow)"),
 	M("v=num", ", verbose=num",    "Print MJIT logs of level num or less to stderr"),
@@ -932,6 +932,20 @@ set_option_encoding_once(const char *type, VALUE *name, const char *e, long elen
 #define set_source_encoding_once(opt, e, elen) \
     set_option_encoding_once("source", &(opt)->src.enc.name, (e), (elen))
 
+static enum rb_mjit_cc
+parse_mjit_cc(const char *s)
+{
+    if (strcmp(s, "gcc") == 0) {
+	return MJIT_CC_GCC;
+    } else if (strcmp(s, "clang") == 0) {
+	return MJIT_CC_CLANG;
+    } else if (strcmp(s, "cl") == 0) {
+	return MJIT_CC_CL;
+    } else {
+	rb_raise(rb_eRuntimeError, "invalid CC `%s' (available CC: gcc, clang, cl)", s);
+    }
+}
+
 static void
 setup_mjit_options(const char *s, struct mjit_options *mjit_opt)
 {
@@ -939,8 +953,10 @@ setup_mjit_options(const char *s, struct mjit_options *mjit_opt)
     if (*s == 0) return;
     if (strcmp(s, ":s") == 0 || strcmp(s, ":save-temps") == 0) {
 	mjit_opt->save_temps = 1;
-    } else if (strcmp(s, ":l") == 0 || strcmp(s, ":llvm") == 0) {
-	mjit_opt->llvm = 1;
+    } else if (strncmp(s, ":c=", 3) == 0) {
+	mjit_opt->cc = parse_mjit_cc(s + 3);
+    } else if (strncmp(s, ":cc=", 4) == 0) {
+	mjit_opt->cc = parse_mjit_cc(s + 4);
     } else if (strcmp(s, ":w") == 0 || strcmp(s, ":warnings") == 0) {
 	mjit_opt->warnings = 1;
     } else if (strcmp(s, ":d") == 0 || strcmp(s, ":debug") == 0) {
