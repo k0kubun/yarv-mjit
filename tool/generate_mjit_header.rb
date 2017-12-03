@@ -16,18 +16,23 @@ cc = ARGV.shift
 args = [src, *ARGV]
 dest = File.join(builddir, File.basename(src).sub(/\.c\z/, '.i'))
 
+suffix = ''
 case cc
 when /\Acl(|\.exe)\z/
   # cl.exe outputs result to *.i
   args.push('-P', '-EP')
 
-  # workaround: This manually preserves macros only for cl.exe.
-  # cl.exe can't keep macro definitions with /P.
-  ruby_h = File.read(File.expand_path("../include/ruby/ruby.h", __dir__))
-  suffix = ruby_h.gsub(/^(?!#define ).+$/, '').gsub(/^.+\\$/, '')
+  # workaround: This manually preserves macros only for cl.exe in a VERY rough way.
+  # This is needed because cl.exe can't keep macro definitions with /P.
+  %w[
+    ../include/ruby/ruby.h
+    ../vm_core.h
+  ].each do |f|
+    header = File.read(File.expand_path(f, __dir__))
+    suffix << header.gsub(/^(?!#define ).+$/, '').gsub(/^.+\\$/, '')
+  end
 else # for gcc, clang
   args.push('-o', dest, '-E', '-dD') # -dD is for clang
-  suffix = nil
 end
 
 cmd = [cc, *args].shelljoin
@@ -35,7 +40,7 @@ unless system(cmd)
   abort "Failed to execute: #{cmd}"
 end
 
-if suffix
+unless suffix.empty?
   File.open(dest, 'a') do |f|
     f.puts suffix
   end
