@@ -954,8 +954,8 @@ vm_call_iseq_optimized.inc: $(srcdir)/tool/mk_call_iseq_optimized.rb
 
 rb_mjit_header.h: PHONY probes.h
 	@$(ECHO) building $@
-	$(Q) $(BASERUBY) $(srcdir)/tool/generate_mjit_header.rb $(srcdir)/vm.c $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER
-	$(Q) (@cmp $(srcdir)/vm.i $@ && echo $@ unchanged && $(RM) $(srcdir)/vm.i) || $(MV) $(srcdir)/vm.i $@
+	$(Q) $(BASERUBY) $(srcdir)/tool/generate_mjit_header.rb "$(PWD)" $(srcdir)/vm.c $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER
+	$(Q) (@cmp vm.i $@ && echo $@ unchanged && $(RM) vm.i) || $(MV) vm.i $@
 
 $(MJIT_MIN_HEADER): rb_mjit_header.h $(srcdir)/tool/minimize_mjit_header.rb
 	@$(ECHO) building $@
