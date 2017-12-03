@@ -57,6 +57,7 @@ ENC_TRANS_D   = $(TIMESTAMPDIR)/.enc-trans.time
 RDOCOUT       = $(EXTOUT)/rdoc
 HTMLOUT       = $(EXTOUT)/html
 CAPIOUT       = doc/capi
+MJIT_MIN_HEADER = $(EXTOUT)/include/$(arch)/rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
 
 INITOBJS      = dmyext.$(OBJEXT) dmyenc.$(OBJEXT)
 NORMALMAINOBJ = main.$(OBJEXT)
@@ -186,7 +187,7 @@ SHOWFLAGS = showflags
 
 all: $(SHOWFLAGS) main docs
 
-main: $(SHOWFLAGS) exts $(ENCSTATIC:static=lib)encs rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
+main: $(SHOWFLAGS) exts $(ENCSTATIC:static=lib)encs $(MJIT_MIN_HEADER)
 	@$(NULLCMD)
 
 .PHONY: showflags
@@ -294,10 +295,7 @@ ruby.imp: $(COMMONOBJS)
 	awk 'BEGIN{print "#!"}; $$2~/^[BDT]$$/&&$$1!~/^(Init_|ruby_static_id_|.*_threadptr_|rb_ec_\.)/{print $$1}' | \
 	sort -u -o $@
 
-install: install-rb-mjit-header install-$(INSTALLDOC)
-
-install-rb-mjit-header: rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
-	$(Q)$(INSTALL_DATA) $< $(arch_hdrdir)
+install: install-$(INSTALLDOC)
 
 docs: $(DOCTARGETS)
 pkgconfig-data: $(ruby_pc)
@@ -569,7 +567,7 @@ distclean-rubyspec: distclean-spec
 realclean:: realclean-ext realclean-local realclean-enc realclean-golf realclean-extout
 realclean-local:: distclean-local
 	$(Q)$(RM) parse.c parse.h lex.c enc/trans/newline.c revision.h
-	$(Q)$(RM) id.c id.h probes.dmyh rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h
+	$(Q)$(RM) id.c id.h probes.dmyh
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) parse.c parse.h lex.c enc/trans/newline.c $(PRELUDES) revision.h
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) id.c id.h probes.dmyh
 	$(Q)$(CHDIR) $(srcdir) && $(exec) $(RM) configure aclocal.m4 tool/config.guess tool/config.sub gems/*.gem
@@ -956,12 +954,12 @@ vm_call_iseq_optimized.inc: $(srcdir)/tool/mk_call_iseq_optimized.rb
 
 rb_mjit_header.h: PHONY probes.h
 	@$(ECHO) building $@
-	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER $(srcdir)/vm.c $(COUTFLAG) $@.new -E -dD
-	$(Q) @cmp $@.new $@ && echo $@ unchanged && rm $@.new && exit 0; mv $@.new $@
+	$(Q) $(BASERUBY) $(srcdir)/tool/generate_mjit_header.rb $(srcdir)/vm.c $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER
+	$(Q) (@cmp $(srcdir)/vm.i $@ && echo $@ unchanged && $(RM) $(srcdir)/vm.i) || $(MV) $(srcdir)/vm.i $@
 
-rb_mjit_min_header-$(RUBY_PROGRAM_VERSION).h: rb_mjit_header.h $(srcdir)/tool/minimize_mjit_header.rb
+$(MJIT_MIN_HEADER): rb_mjit_header.h $(srcdir)/tool/minimize_mjit_header.rb
 	@$(ECHO) building $@
-	$(BASERUBY) $(srcdir)/tool/minimize_mjit_header.rb $(CC) rb_mjit_header.h $@.new && mv $@.new $@
+	$(BASERUBY) $(srcdir)/tool/minimize_mjit_header.rb "$(CC)" rb_mjit_header.h $@
 
 $(MINIPRELUDE_C): $(COMPILE_PRELUDE)
 	$(ECHO) generating $@

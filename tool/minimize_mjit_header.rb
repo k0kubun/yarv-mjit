@@ -2,6 +2,7 @@
 # This is a script to transform functions to static inline.
 # The script puts the result into stdout.
 
+require 'fileutils'
 require 'tempfile'
 
 module MJITHeader
@@ -72,6 +73,12 @@ module MJITHeader
   def self.remove_bad_macros!(code)
     code.gsub!(/^#define #{Regexp.union(MACRO_BLACKLIST)} .*$/, '')
   end
+
+  def self.write(code, out:)
+    FileUtils.mkdir_p(File.dirname(out))
+    File.write("#{out}.new", code)
+    FileUtils.mv("#{out}.new", out)
+  end
 end
 
 if ARGV.size != 3
@@ -82,18 +89,23 @@ end
 cc      = ARGV[0]
 code    = File.read(ARGV[1]) # Current version of the header file.
 outfile = ARGV[2]
-cflags  = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
+if cc =~ /\Acl(\z| |\.exe)/
+  cflags = '-DMJIT_HEADER -Zs'
+else
+  cflags = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
+end
 
 MJITHeader.remove_bad_macros!(code)
 
 # Check initial file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'initial')
-if RUBY_PLATFORM =~ /mingw/ # transformation is broken on MinGW for now
-  File.write(outfile, code)
+if RUBY_PLATFORM =~ /mswin|mingw|msys/ # transformation is broken with Windows headers for now
+  STDERR.puts "\nSkipped transforming external functions to static on Windows."
+  MJITHeader.write(code, out: outfile)
   exit 0
 end
 
-STDERR.puts "\nTransforming external function to static:"
+STDERR.puts "\nTransforming external functions to static:"
 
 stop_pos     = code.length - 1
 extern_names = []
@@ -129,4 +141,4 @@ end
 # Check the final file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'final')
 
-File.write(outfile, code)
+MJITHeader.write(code, out: outfile)
