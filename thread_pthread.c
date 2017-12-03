@@ -1799,6 +1799,7 @@ mjit_worker(void *arg)
 	fprintf(stderr, "Cannot enable cancelation in MJIT worker\n");
     }
     worker_func();
+    return NULL;
 }
 
 /* Launch MJIT thread. Returns FALSE if it fails to create thread. */

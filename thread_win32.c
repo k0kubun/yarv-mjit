@@ -777,6 +777,8 @@ native_set_thread_name(rb_thread_t *th)
 {
 }
 
+#ifdef __MINGW32__
+
 #include <pthread.h>
 
 /* A function that wraps actual worker function, for pthread abstraction. */
@@ -789,6 +791,7 @@ mjit_worker(void *arg)
 	fprintf(stderr, "Cannot enable cancelation in MJIT worker\n");
     }
     worker_func();
+    return NULL;
 }
 
 /* Launch MJIT thread. Returns FALSE if it fails to create thread. */
@@ -809,5 +812,15 @@ rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_func)(void)
 	return FALSE;
     }
 }
+
+#else /* __MINGW32__ */
+
+int
+rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_func)(void))
+{
+    return FALSE;
+}
+
+#endif /* __MINGW32__ */
 
 #endif /* THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION */
