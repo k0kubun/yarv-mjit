@@ -781,19 +781,19 @@ init_header_filename()
 {
     FILE *f;
 
-    header_file = xmalloc(strlen(BUILD_DIR) + 2 + strlen(RUBY_MJIT_HEADER_FILE));
+    header_file = xmalloc(strlen(MJIT_HEADER_BUILD_DIR) + 2 + strlen(RUBY_MJIT_HEADER_FILE));
     if (header_file == NULL)
 	return;
-    strcpy(header_file, BUILD_DIR);
+    strcpy(header_file, MJIT_HEADER_BUILD_DIR);
     strcat(header_file, "/");
     strcat(header_file, RUBY_MJIT_HEADER_FILE);
 
     if ((f = fopen(header_file, "r")) == NULL) {
 	xfree(header_file);
-	header_file = xmalloc(strlen(DEST_INCDIR) + 2 + strlen(RUBY_MJIT_HEADER_FILE));
+	header_file = xmalloc(strlen(MJIT_HEADER_INSTALL_DIR) + 2 + strlen(RUBY_MJIT_HEADER_FILE));
 	if (header_file == NULL)
 	    return;
-	strcpy(header_file, DEST_INCDIR);
+	strcpy(header_file, MJIT_HEADER_INSTALL_DIR);
 	strcat(header_file, "/");
 	strcat(header_file, RUBY_MJIT_HEADER_FILE);
 	if ((f = fopen(header_file, "r")) == NULL) {
