@@ -11,9 +11,14 @@ module MJITHeader
   FUNC_HEADER_REGEXP = /\A(\s*#{ATTR_REGEXP})*[^\[{(]*\((#{ATTR_REGEXP}|[^()])*\)(\s*#{ATTR_REGEXP})*\s*/
 
   # For MinGW's ras.h. Those macros have its name in its definition and can't be preprocessed multiple times.
-  RECURSIVE_MACROS   = %w[
+  RECURSIVE_MACROS = %w[
     RASCTRYINFO
     RASIPADDR
+  ]
+
+  # Those functions increase the time to compile when inlined. So we use them as external functions.
+  FORCE_EXTERN_FUNCTIONS = %w[
+    vm_search_method
   ]
 
   # Return start..stop of last decl in CODE ending STOP
@@ -127,7 +132,10 @@ loop do
   decl = code[decl_range]
   decl_name = MJITHeader.decl_name_of(decl)
 
-  if extern_names.include?(decl_name) && (decl =~ /#{MJITHeader::FUNC_HEADER_REGEXP};/)
+  if MJITHeader::FORCE_EXTERN_FUNCTIONS.include?(decl_name)
+    STDERR.puts "warning: changing definition of '#{decl_name}' to declaration:"
+    code[decl_range] = decl.sub(/{.+}/m, ';')
+  elsif extern_names.include?(decl_name) && (decl =~ /#{MJITHeader::FUNC_HEADER_REGEXP};/)
     decl.sub!(/extern|static|inline/, '')
     STDERR.puts "warning: making declaration of '#{decl_name}' static inline:"
 
