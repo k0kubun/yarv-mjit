@@ -428,13 +428,13 @@ remove_from_unit_queue(struct rb_mjit_unit *unit)
     }
 }
 
-/* Remove and return the best unit from unit_queue.  The best
+/* Return the best unit from unit_queue.  The best
    is the first high priority unit or the unit whose iseq has the
    biggest number of calls so far.  */
 static struct rb_mjit_unit *
-get_from_unit_queue()
+best_unit_from_unit_queue()
 {
-    struct rb_mjit_unit *unit, *dequeued = NULL;
+    struct rb_mjit_unit *unit, *best = NULL;
 
     if (unit_queue == NULL)
 	return NULL;
@@ -447,12 +447,12 @@ get_from_unit_queue()
 	    continue;
 	}
 
-	if (dequeued == NULL || dequeued->iseq->body->total_calls < unit->iseq->body->total_calls) {
-	    dequeued = unit;
+	if (best == NULL || best->iseq->body->total_calls < unit->iseq->body->total_calls) {
+	    best = unit;
 	}
     }
 
-    return dequeued;
+    return best;
 }
 
 /* XXX_COMMONN_ARGS define the command line arguments of XXX C
@@ -737,7 +737,7 @@ worker()
 	    native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
 	    verbose(3, "Getting wakeup from client");
 	}
-	unit = get_from_unit_queue();
+	unit = best_unit_from_unit_queue();
 	CRITICAL_SECTION_FINISH(3, "in worker dequeue");
 
 	if (unit) {
