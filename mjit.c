@@ -81,6 +81,7 @@
 #include "vm_core.h"
 #include "mjit.h"
 #include "version.h"
+#include "gc.h"
 
 extern void native_mutex_lock(rb_nativethread_lock_t *lock);
 extern void native_mutex_unlock(rb_nativethread_lock_t *lock);
@@ -451,8 +452,6 @@ get_from_unit_queue()
 	}
     }
 
-    if (dequeued)
-	remove_from_unit_queue(dequeued);
     return dequeued;
 }
 
@@ -750,6 +749,7 @@ worker()
 		/* Usage of jit_code might be not in a critical section.  */
 		ATOMIC_SET(unit->iseq->body->jit_func, func);
 	    }
+	    remove_from_unit_queue(unit);
 	    CRITICAL_SECTION_FINISH(3, "in jit func replace");
 	}
     }
@@ -965,6 +965,23 @@ mjit_finish()
 
     mjit_init_p = FALSE;
     verbose(1, "Successful MJIT finish");
+}
+
+void
+mjit_mark(void)
+{
+    struct rb_mjit_unit *unit;
+    if (!mjit_init_p)
+	return;
+    RUBY_MARK_ENTER("mjit");
+    CRITICAL_SECTION_START(4, "mjit_mark");
+    for(unit = unit_queue; unit; unit = unit->next) {
+	if (unit->iseq) {
+	    rb_gc_mark((VALUE)unit->iseq);
+	}
+    }
+    CRITICAL_SECTION_FINISH(4, "mjit_mark");
+    RUBY_MARK_LEAVE("mjit");
 }
 
 VALUE

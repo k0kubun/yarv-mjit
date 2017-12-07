@@ -72,6 +72,7 @@ extern void mjit_finish();
 extern void mjit_gc_start_hook();
 extern void mjit_gc_finish_hook();
 extern void mjit_free_iseq(const rb_iseq_t *iseq);
+extern void mjit_mark();
 
 /* A threshold used to add iseq to JIT. */
 #define NUM_CALLS_TO_ADD 5
