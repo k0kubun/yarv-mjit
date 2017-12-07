@@ -2120,6 +2120,8 @@ rb_vm_mark(void *ptr)
 	rb_vm_trace_mark_event_hooks(&vm->event_hooks);
 
 	rb_gc_mark_values(RUBY_NSIG, vm->trap_list.cmd);
+
+	mjit_mark();
     }
 
     RUBY_MARK_LEAVE("vm");

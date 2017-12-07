@@ -81,6 +81,7 @@
 #include "vm_core.h"
 #include "mjit.h"
 #include "version.h"
+#include "gc.h"
 
 extern void native_mutex_lock(rb_nativethread_lock_t *lock);
 extern void native_mutex_unlock(rb_nativethread_lock_t *lock);
@@ -427,13 +428,13 @@ remove_from_unit_queue(struct rb_mjit_unit *unit)
     }
 }
 
-/* Remove and return the best unit from unit_queue.  The best
+/* Return the best unit from unit_queue.  The best
    is the first high priority unit or the unit whose iseq has the
    biggest number of calls so far.  */
 static struct rb_mjit_unit *
-get_from_unit_queue()
+best_unit_from_unit_queue()
 {
-    struct rb_mjit_unit *unit, *dequeued = NULL;
+    struct rb_mjit_unit *unit, *best = NULL;
 
     if (unit_queue == NULL)
 	return NULL;
@@ -446,14 +447,12 @@ get_from_unit_queue()
 	    continue;
 	}
 
-	if (dequeued == NULL || dequeued->iseq->body->total_calls < unit->iseq->body->total_calls) {
-	    dequeued = unit;
+	if (best == NULL || best->iseq->body->total_calls < unit->iseq->body->total_calls) {
+	    best = unit;
 	}
     }
 
-    if (dequeued)
-	remove_from_unit_queue(dequeued);
-    return dequeued;
+    return best;
 }
 
 /* XXX_COMMONN_ARGS define the command line arguments of XXX C
@@ -738,7 +737,7 @@ worker()
 	    native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
 	    verbose(3, "Getting wakeup from client");
 	}
-	unit = get_from_unit_queue();
+	unit = best_unit_from_unit_queue();
 	CRITICAL_SECTION_FINISH(3, "in worker dequeue");
 
 	if (unit) {
@@ -750,6 +749,7 @@ worker()
 		/* Usage of jit_code might be not in a critical section.  */
 		ATOMIC_SET(unit->iseq->body->jit_func, func);
 	    }
+	    remove_from_unit_queue(unit);
 	    CRITICAL_SECTION_FINISH(3, "in jit func replace");
 	}
     }
@@ -965,6 +965,23 @@ mjit_finish()
 
     mjit_init_p = FALSE;
     verbose(1, "Successful MJIT finish");
+}
+
+void
+mjit_mark(void)
+{
+    struct rb_mjit_unit *unit;
+    if (!mjit_init_p)
+	return;
+    RUBY_MARK_ENTER("mjit");
+    CRITICAL_SECTION_START(4, "mjit_mark");
+    for(unit = unit_queue; unit; unit = unit->next) {
+	if (unit->iseq) {
+	    rb_gc_mark((VALUE)unit->iseq);
+	}
+    }
+    CRITICAL_SECTION_FINISH(4, "mjit_mark");
+    RUBY_MARK_LEAVE("mjit");
 }
 
 VALUE
