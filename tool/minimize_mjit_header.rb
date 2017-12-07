@@ -16,16 +16,16 @@ module MJITHeader
     RASIPADDR
   ]
 
-  # Return start..stop of last (N>=1) decls in CODE ending STOP
-  def self.find_decl(code, stop, n)
-    level = curr = start = 0
+  # Return start..stop of last decl in CODE ending STOP
+  def self.find_decl(code, stop)
+    level = start = 0
 
     stop.downto(0) do |i|
       if level == 0 && (i == 0 || code[i] == ';' || code[i] == '}')
         start = i
-        curr += 1 if stop != start
+        found = true if stop != start
         start = -1 if i == 0 && code[i] != ';' && code[i] != '}'
-        return start + 1..stop if curr == n
+        return start + 1..stop if found
         level += 1 if code[i] == '}'
       elsif code[i] == '}'
         level += 1
@@ -112,7 +112,7 @@ extern_names = []
 
 # This loop changes function declarations to static inline.
 loop do
-  decl_range = MJITHeader.find_decl(code, stop_pos, 1)
+  decl_range = MJITHeader.find_decl(code, stop_pos)
   break if decl_range.end < 0
 
   stop_pos = decl_range.begin - 1
