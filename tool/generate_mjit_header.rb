@@ -19,7 +19,7 @@ when /\Acl(|\.exe)\z/
   args.push('-P')
 else # for gcc, clang
   dest = File.join(builddir, File.basename(src).sub(/\.c\z/, '.i'))
-  args.push('-o', dest, '-E', '-dD') # -dD is for clang
+  args.push('-o', dest, '-E', '-P', '-dD') # -dD is for clang
 end
 
 Process.exec(cc, *args)
