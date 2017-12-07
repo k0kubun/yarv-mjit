@@ -11,7 +11,7 @@ module MJITHeader
   FUNC_HEADER_REGEXP = /\A(\s*#{ATTR_REGEXP})*[^\[{(]*\((#{ATTR_REGEXP}|[^()])*\)(\s*#{ATTR_REGEXP})*\s*/
 
   # For MinGW's ras.h. Those macros have its name in its definition and can't be preprocessed multiple times.
-  MACRO_BLACKLIST    = %w[
+  RECURSIVE_MACROS   = %w[
     RASCTRYINFO
     RASIPADDR
   ]
@@ -70,14 +70,20 @@ module MJITHeader
     end
   end
 
-  def self.remove_bad_macros!(code)
-    code.gsub!(/^#define #{Regexp.union(MACRO_BLACKLIST)} .*$/, '')
+  # Remove unpreprocessable macros
+  def self.remove_harmful_macros!(code)
+    code.gsub!(/^#define #{Regexp.union(RECURSIVE_MACROS)} .*$/, '')
   end
 
   def self.write(code, out:)
     FileUtils.mkdir_p(File.dirname(out))
     File.write("#{out}.new", code)
     FileUtils.mv("#{out}.new", out)
+  end
+
+  # Note that this checks runruby. This conservatively covers platform names.
+  def self.windows?
+    RUBY_PLATFORM =~ /mswin|mingw|msys/
   end
 end
 
@@ -95,16 +101,18 @@ else
   cflags = '-S -DMJIT_HEADER -fsyntax-only -Werror=implicit-function-declaration -Werror=implicit-int -Wfatal-errors'
 end
 
-MJITHeader.remove_bad_macros!(code)
+if MJITHeader.windows?
+  MJITHeader.remove_harmful_macros!(code)
+end
 
 # Check initial file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'initial')
-if RUBY_PLATFORM =~ /mswin|mingw|msys/ # transformation is broken with Windows headers for now
+
+if MJITHeader.windows? # transformation is broken with Windows headers for now
   STDERR.puts "\nSkipped transforming external functions to static on Windows."
   MJITHeader.write(code, out: outfile)
   exit 0
 end
-
 STDERR.puts "\nTransforming external functions to static:"
 
 stop_pos     = code.length - 1
