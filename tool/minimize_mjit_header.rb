@@ -16,9 +16,12 @@ module MJITHeader
     RASIPADDR
   ]
 
-  # Those functions increase the time to compile when inlined. So we use them as external functions.
-  FORCE_EXTERN_FUNCTIONS = %w[
-    vm_search_method
+  IGNORED_FUNCTIONS = [
+    # Those functions increase the time to compile when inlined. So we use them as external functions.
+    'vm_search_method',
+
+    # Following ones are not used from VM
+    'rb_equal_opt',
   ]
 
   # Return start..stop of last decl in CODE ending STOP
@@ -44,6 +47,7 @@ module MJITHeader
   # Given DECL return the name of it, nil if failed
   def self.decl_name_of(decl)
     ident_regex = /\w+/
+    decl = decl.gsub(/^#.+$/, '') # remove macros
     reduced_decl = decl.gsub(/#{ATTR_REGEXP}/, '') # remove attributes
     su1_regex = /{[^{}]*}/
     su2_regex = /{([^{}]|su1_regex)*}/
@@ -132,7 +136,9 @@ loop do
   decl = code[decl_range]
   decl_name = MJITHeader.decl_name_of(decl)
 
-  if MJITHeader::FORCE_EXTERN_FUNCTIONS.include?(decl_name)
+  if decl.lstrip.start_with?('#define ')
+    # skip
+  elsif MJITHeader::IGNORED_FUNCTIONS.include?(decl_name) && /#{MJITHeader::FUNC_HEADER_REGEXP}{/.match(decl)
     STDERR.puts "warning: changing definition of '#{decl_name}' to declaration:"
     code[decl_range] = decl.sub(/{.+}/m, ';')
   elsif extern_names.include?(decl_name) && (decl =~ /#{MJITHeader::FUNC_HEADER_REGEXP};/)
