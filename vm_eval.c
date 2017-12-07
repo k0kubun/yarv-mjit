@@ -11,8 +11,6 @@
 
 **********************************************************************/
 
-#ifndef MJIT_HEADER
-
 struct local_var_list {
     VALUE tbl;
 };
@@ -22,9 +20,7 @@ static inline VALUE vm_yield_with_cref(rb_execution_context_t *ec, int argc, con
 static inline VALUE vm_yield(rb_execution_context_t *ec, int argc, const VALUE *argv);
 static inline VALUE vm_yield_with_block(rb_execution_context_t *ec, int argc, const VALUE *argv, VALUE block_handler);
 static inline VALUE vm_yield_force_blockarg(rb_execution_context_t *ec, VALUE args);
-#endif /* #ifndef MJIT_HEADER */
 VALUE vm_exec(rb_execution_context_t *ec);
-#ifndef MJIT_HEADER
 static void vm_set_eval_stack(rb_execution_context_t * th, const rb_iseq_t *iseq, const rb_cref_t *cref, const struct rb_block *base_block);
 static int vm_collect_local_variables_in_heap(const VALUE *dfp, const struct local_var_list *vars);
 
@@ -41,6 +37,8 @@ typedef enum call_type {
 
 static VALUE send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope);
 static VALUE vm_call0_body(rb_execution_context_t* ec, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc, const VALUE *argv);
+
+#ifndef MJIT_HEADER
 
 RUBY_FUNC_EXPORTED VALUE
 vm_call0(rb_execution_context_t *ec, VALUE recv, ID id, int argc, const VALUE *argv, const rb_callable_method_entry_t *me)

@@ -17,11 +17,8 @@ module MJITHeader
   ]
 
   IGNORED_FUNCTIONS = [
-    # Those functions increase the time to compile when inlined. So we use them as external functions.
-    'vm_search_method',
-
-    # Following ones are not used from VM
-    'rb_equal_opt',
+    'vm_search_method', # This increases the time to compile when inlined. So we use it as external function.
+    'rb_equal_opt', # Not used from VM and not compilable
   ]
 
   # Return start..stop of last decl in CODE ending STOP
