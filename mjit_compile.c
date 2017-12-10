@@ -249,17 +249,22 @@ fprint_opt_call_with_key(FILE *f, VALUE ci, VALUE cc, VALUE key, unsigned int st
 struct case_dispatch_var {
     FILE *f;
     unsigned int base_pos;
+    VALUE last_value;
 };
 
 static int
 compile_case_dispatch_each(VALUE key, VALUE value, VALUE arg)
 {
     struct case_dispatch_var *var = (struct case_dispatch_var *)arg;
-    unsigned int offset = FIX2INT(value);
+    unsigned int offset;
 
-    fprintf(var->f, "    case %d:\n", offset);
-    fprintf(var->f, "      goto label_%d;\n", var->base_pos + offset);
-    fprintf(var->f, "      break;\n");
+    if (var->last_value != value) {
+	offset = FIX2INT(value);
+	var->last_value = value;
+	fprintf(var->f, "    case %d:\n", offset);
+	fprintf(var->f, "      goto label_%d;\n", var->base_pos + offset);
+	fprintf(var->f, "      break;\n");
+    }
     return ST_CONTINUE;
 }
 
@@ -635,6 +640,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    struct case_dispatch_var arg;
 	    arg.f = f;
 	    arg.base_pos = pos + insn_len(insn);
+	    arg.last_value = Qundef;
 
 	    fprintf(f, "  switch (vm_case_dispatch(0x%"PRIxVALUE", 0x%"PRIxVALUE", stack[%d])) {\n", operands[0], operands[1], --b->stack_size);
 	    rb_hash_foreach(operands[0], compile_case_dispatch_each, (VALUE)&arg);
