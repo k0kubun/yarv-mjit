@@ -9,7 +9,6 @@
 #include "internal.h"
 #include "vm_core.h"
 #include "vm_exec.h"
-#include "vm_insnhelper.h"
 #include "mjit.h"
 #include "insns.inc"
 #include "insns_info.inc"
@@ -812,6 +811,8 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
     if (body->stack_max > 0) {
 	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
     }
+
+    /* Simulate `opt_pc` in setup_parameters_complex */
     if (body->param.flags.has_opt) {
 	int i;
 	fprintf(f, "\n");
@@ -823,6 +824,7 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
 	}
 	fprintf(f, "  }\n");
     }
+
     compile_insns(f, body, 0, 0, &status);
     compile_cancel_handler(f, body);
     fprintf(f, "}\n");
