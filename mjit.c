@@ -638,7 +638,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 	    }
 	}
 	if (mjit_opts.cc == MJIT_CC_CL)
-	    fprintf(f, suffix);
+	    fprintf(f, "%s", suffix);
 	fprintf(f, "\"\n");
     }
 

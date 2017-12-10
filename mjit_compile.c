@@ -12,6 +12,7 @@
 #include "mjit.h"
 #include "insns.inc"
 #include "insns_info.inc"
+#include "vm_insnhelper.h"
 
 /* Storage to keep compiler's status.  This should have information
    which is global during one `mjit_compile` call.  Ones conditional
