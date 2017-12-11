@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include "ruby_assert.h"
 #include "debug_counter.h"
+#include "mjit.h"
 
 #undef rb_data_object_wrap
 
@@ -4047,7 +4048,7 @@ stack_check(rb_execution_context_t *ec, int water_mark)
 
 #define STACKFRAME_FOR_CALL_CFUNC 838
 
-int
+RUBY_FUNC_EXPORTED int
 rb_ec_stack_check(rb_execution_context_t *ec)
 {
     return stack_check(ec, STACKFRAME_FOR_CALL_CFUNC);
@@ -6046,7 +6047,7 @@ rb_gc_writebarrier_unprotect(VALUE obj)
 /*
  * remember `obj' if needed.
  */
-void
+RUBY_FUNC_EXPORTED void
 rb_gc_writebarrier_remember(VALUE obj)
 {
     rb_objspace_t *objspace = &rb_objspace;
@@ -6607,6 +6608,8 @@ gc_enter(rb_objspace_t *objspace, const char *event)
     GC_ASSERT(during_gc == 0);
     if (RGENGC_CHECK_MODE >= 3) gc_verify_internal_consistency(Qnil);
 
+    mjit_gc_start_hook();
+
     during_gc = TRUE;
     gc_report(1, objspace, "gc_entr: %s [%s]\n", event, gc_current_status(objspace));
     gc_record(objspace, 0, event);
@@ -6622,6 +6625,8 @@ gc_exit(rb_objspace_t *objspace, const char *event)
     gc_record(objspace, 1, event);
     gc_report(1, objspace, "gc_exit: %s [%s]\n", event, gc_current_status(objspace));
     during_gc = FALSE;
+
+    mjit_gc_finish_hook();
 }
 
 static void *

@@ -12,6 +12,7 @@
 #ifdef THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION
 
 #include "gc.h"
+#include "mjit.h"
 
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/resource.h>
@@ -34,16 +35,16 @@
 #include <kernel/OS.h>
 #endif
 
-static void native_mutex_lock(rb_nativethread_lock_t *lock);
-static void native_mutex_unlock(rb_nativethread_lock_t *lock);
+void native_mutex_lock(rb_nativethread_lock_t *lock);
+void native_mutex_unlock(rb_nativethread_lock_t *lock);
 static int native_mutex_trylock(rb_nativethread_lock_t *lock);
-static void native_mutex_initialize(rb_nativethread_lock_t *lock);
-static void native_mutex_destroy(rb_nativethread_lock_t *lock);
-static void native_cond_signal(rb_nativethread_cond_t *cond);
-static void native_cond_broadcast(rb_nativethread_cond_t *cond);
-static void native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex);
-static void native_cond_initialize(rb_nativethread_cond_t *cond, int flags);
-static void native_cond_destroy(rb_nativethread_cond_t *cond);
+void native_mutex_initialize(rb_nativethread_lock_t *lock);
+void native_mutex_destroy(rb_nativethread_lock_t *lock);
+void native_cond_signal(rb_nativethread_cond_t *cond);
+void native_cond_broadcast(rb_nativethread_cond_t *cond);
+void native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex);
+void native_cond_initialize(rb_nativethread_cond_t *cond, int flags);
+void native_cond_destroy(rb_nativethread_cond_t *cond);
 static void rb_thread_wakeup_timer_thread_low(void);
 static struct {
     pthread_t id;
@@ -202,7 +203,7 @@ mutex_debug(const char *msg, void *lock)
     }
 }
 
-static void
+void
 native_mutex_lock(pthread_mutex_t *lock)
 {
     int r;
@@ -212,7 +213,7 @@ native_mutex_lock(pthread_mutex_t *lock)
     }
 }
 
-static void
+void
 native_mutex_unlock(pthread_mutex_t *lock)
 {
     int r;
@@ -238,7 +239,7 @@ native_mutex_trylock(pthread_mutex_t *lock)
     return 0;
 }
 
-static void
+void
 native_mutex_initialize(pthread_mutex_t *lock)
 {
     int r = pthread_mutex_init(lock, 0);
@@ -248,7 +249,7 @@ native_mutex_initialize(pthread_mutex_t *lock)
     }
 }
 
-static void
+void
 native_mutex_destroy(pthread_mutex_t *lock)
 {
     int r = pthread_mutex_destroy(lock);
@@ -258,7 +259,7 @@ native_mutex_destroy(pthread_mutex_t *lock)
     }
 }
 
-static void
+void
 native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
 {
 #ifdef HAVE_PTHREAD_COND_INIT
@@ -289,7 +290,7 @@ native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
 #endif
 }
 
-static void
+void
 native_cond_destroy(rb_nativethread_cond_t *cond)
 {
 #ifdef HAVE_PTHREAD_COND_INIT
@@ -310,7 +311,7 @@ native_cond_destroy(rb_nativethread_cond_t *cond)
  * need to retrying until pthread functions don't return EAGAIN.
  */
 
-static void
+void
 native_cond_signal(rb_nativethread_cond_t *cond)
 {
     int r;
@@ -322,7 +323,7 @@ native_cond_signal(rb_nativethread_cond_t *cond)
     }
 }
 
-static void
+void
 native_cond_broadcast(rb_nativethread_cond_t *cond)
 {
     int r;
@@ -334,7 +335,7 @@ native_cond_broadcast(rb_nativethread_cond_t *cond)
     }
 }
 
-static void
+void
 native_cond_wait(rb_nativethread_cond_t *cond, pthread_mutex_t *mutex)
 {
     int r = pthread_cond_wait(&cond->cond, mutex);
@@ -1786,6 +1787,38 @@ rb_nativethread_id_t
 rb_nativethread_self(void)
 {
     return pthread_self();
+}
+
+/* A function that wraps actual worker function, for pthread abstraction. */
+static void *
+mjit_worker(void *arg)
+{
+    void (*worker_func)(void) = arg;
+
+    if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL) != 0) {
+	fprintf(stderr, "Cannot enable cancelation in MJIT worker\n");
+    }
+    worker_func();
+    return NULL;
+}
+
+/* Launch MJIT thread. Returns FALSE if it fails to create thread. */
+int
+rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_func)(void))
+{
+    pthread_attr_t attr;
+    pthread_t worker_pid;
+
+    pthread_atfork(NULL, NULL, child_hook);
+    if (pthread_attr_init(&attr) == 0
+	&& pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM) == 0
+	&& pthread_create(&worker_pid, &attr, mjit_worker, worker_func) == 0) {
+	/* jit_worker thread is not to be joined */
+	pthread_detach(worker_pid);
+	return TRUE;
+    } else {
+	return FALSE;
+    }
 }
 
 #endif /* THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION */

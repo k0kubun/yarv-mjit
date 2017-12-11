@@ -1154,7 +1154,7 @@ flodivmod(double x, double y, double *divp, double *modp)
  * An error will be raised if y == 0.
  */
 
-double
+RUBY_FUNC_EXPORTED double
 ruby_float_mod(double x, double y)
 {
     double mod;
@@ -1330,7 +1330,7 @@ num_equal(VALUE x, VALUE y)
  *  so an implementation-dependent value is returned.
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_float_equal(VALUE x, VALUE y)
 {
     volatile double a, b;
@@ -1433,7 +1433,7 @@ flo_cmp(VALUE x, VALUE y)
     return rb_dbl_cmp(a, b);
 }
 
-int
+RUBY_FUNC_EXPORTED int
 rb_float_cmp(VALUE x, VALUE y)
 {
     return NUM2INT(flo_cmp(x, y));

@@ -24,8 +24,8 @@
 static volatile DWORD ruby_native_thread_key = TLS_OUT_OF_INDEXES;
 
 static int w32_wait_events(HANDLE *events, int count, DWORD timeout, rb_thread_t *th);
-static void native_mutex_lock(rb_nativethread_lock_t *lock);
-static void native_mutex_unlock(rb_nativethread_lock_t *lock);
+void native_mutex_lock(rb_nativethread_lock_t *lock);
+void native_mutex_unlock(rb_nativethread_lock_t *lock);
 
 static void
 w32_error(const char *func)
@@ -302,7 +302,7 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
     GVL_UNLOCK_END();
 }
 
-static void
+void
 native_mutex_lock(rb_nativethread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
@@ -312,7 +312,7 @@ native_mutex_lock(rb_nativethread_lock_t *lock)
 #endif
 }
 
-static void
+void
 native_mutex_unlock(rb_nativethread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
@@ -343,7 +343,7 @@ native_mutex_trylock(rb_nativethread_lock_t *lock)
 #endif
 }
 
-static void
+void
 native_mutex_initialize(rb_nativethread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
@@ -354,7 +354,7 @@ native_mutex_initialize(rb_nativethread_lock_t *lock)
 #endif
 }
 
-static void
+void
 native_mutex_destroy(rb_nativethread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
@@ -370,8 +370,7 @@ struct cond_event_entry {
     HANDLE event;
 };
 
-#if 0
-static void
+void
 native_cond_signal(rb_nativethread_cond_t *cond)
 {
     /* cond is guarded by mutex */
@@ -390,7 +389,7 @@ native_cond_signal(rb_nativethread_cond_t *cond)
     }
 }
 
-static void
+void
 native_cond_broadcast(rb_nativethread_cond_t *cond)
 {
     /* cond is guarded by mutex */
@@ -442,12 +441,13 @@ native_cond_timedwait_ms(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *m
     return (r == WAIT_OBJECT_0) ? 0 : ETIMEDOUT;
 }
 
-static void
+void
 native_cond_wait(rb_nativethread_cond_t *cond, rb_nativethread_lock_t *mutex)
 {
     native_cond_timedwait_ms(cond, mutex, INFINITE);
 }
 
+#if 0
 static unsigned long
 abs_timespec_to_timeout_ms(const struct timespec *ts)
 {
@@ -505,20 +505,20 @@ native_cond_timeout(rb_nativethread_cond_t *cond, struct timespec timeout_rel)
 
     return timeout;
 }
+#endif
 
-static void
+void
 native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
 {
     cond->next = (struct cond_event_entry *)cond;
     cond->prev = (struct cond_event_entry *)cond;
 }
 
-static void
+void
 native_cond_destroy(rb_nativethread_cond_t *cond)
 {
     /* */
 }
-#endif
 
 void
 ruby_init_stack(volatile VALUE *addr)
@@ -775,6 +775,28 @@ rb_nativethread_self(void)
 static void
 native_set_thread_name(rb_thread_t *th)
 {
+}
+
+static unsigned long __stdcall
+mjit_worker(void *arg)
+{
+    void (*worker_func)(void) = arg;
+    worker_func();
+    return 0;
+}
+
+/* Launch MJIT thread. Returns FALSE if it fails to create thread. */
+int
+rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_func)(void))
+{
+    size_t stack_size = 4 * 1024; /* 4KB is the minimum commit size */
+    HANDLE thread_id = w32_create_thread(stack_size, mjit_worker, worker_func);
+    if (thread_id == 0) {
+	return FALSE;
+    }
+
+    w32_resume_thread(thread_id);
+    return TRUE;
 }
 
 #endif /* THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION */
