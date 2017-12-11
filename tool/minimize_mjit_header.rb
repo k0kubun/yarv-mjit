@@ -81,6 +81,17 @@ module MJITHeader
     code.gsub!(/^#define #{Regexp.union(RECURSIVE_MACROS)} .*$/, '')
   end
 
+  # -dD outputs those macros, and it produces redefinition warnings
+  def self.remove_default_macros!(code)
+    code.gsub!(/^#define __STDC_.+$/, '')
+    code.gsub!(/^#define assert\([^\)]+\) .+$/, '')
+  end
+
+  # This makes easier to process code
+  def self.separate_macro_and_code(code)
+    code.lines.partition { |l| !l.start_with?('#') }.flatten.join('')
+  end
+
   def self.write(code, out:)
     FileUtils.mkdir_p(File.dirname(out))
     File.write("#{out}.new", code)
@@ -110,6 +121,8 @@ end
 if MJITHeader.windows?
   MJITHeader.remove_harmful_macros!(code)
 end
+MJITHeader.remove_default_macros!(code)
+code = MJITHeader.separate_macro_and_code(code)
 
 # Check initial file correctness
 MJITHeader.check_code!(code, cc, cflags, stage: 'initial')
@@ -121,7 +134,7 @@ if MJITHeader.windows? # transformation is broken with Windows headers for now
 end
 STDERR.puts "\nTransforming external functions to static:"
 
-stop_pos     = code.length - 1
+stop_pos     = code.match(/^#/).begin(0) # See `separate_macro_and_code`. This ignores proprocessors.
 extern_names = []
 
 # This loop changes function declarations to static inline.
@@ -133,14 +146,12 @@ loop do
   decl = code[decl_range]
   decl_name = MJITHeader.decl_name_of(decl)
 
-  if decl.lstrip.start_with?('#define ')
-    # skip
-  elsif MJITHeader::IGNORED_FUNCTIONS.include?(decl_name) && /#{MJITHeader::FUNC_HEADER_REGEXP}{/.match(decl)
-    STDERR.puts "warning: changing definition of '#{decl_name}' to declaration:"
+  if MJITHeader::IGNORED_FUNCTIONS.include?(decl_name) && /#{MJITHeader::FUNC_HEADER_REGEXP}{/.match(decl)
+    STDERR.puts "minimize_mjit_header: changing definition of '#{decl_name}' to declaration:"
     code[decl_range] = decl.sub(/{.+}/m, ';')
   elsif extern_names.include?(decl_name) && (decl =~ /#{MJITHeader::FUNC_HEADER_REGEXP};/)
-    decl.sub!(/extern|static|inline/, '')
-    STDERR.puts "warning: making declaration of '#{decl_name}' static inline:"
+    decl.sub!(/(extern|static|inline) /, ' ')
+    STDERR.puts "minimize_mjit_header: making declaration of '#{decl_name}' static inline:"
 
     code[decl_range] = "static inline #{decl}"
   elsif (match = /#{MJITHeader::FUNC_HEADER_REGEXP}{/.match(decl)) && (header = match[0]) !~ /static/
@@ -151,8 +162,8 @@ loop do
       STDERR.puts "warning: a static decl inside external definition of '#{decl_name}'"
     end
 
-    header.sub!(/extern|inline/, '')
-    STDERR.puts "warning: making external definition of '#{decl_name}' static inline:"
+    header.sub!(/(extern|inline) /, ' ')
+    STDERR.puts "minimize_mjit_header: making external definition of '#{decl_name}' static inline"
     code[decl_range] = "static inline #{header}#{decl}"
   end
 end

@@ -296,7 +296,6 @@ ruby.imp: $(COMMONOBJS)
 	sort -u -o $@
 
 install: install-$(INSTALLDOC)
-
 docs: $(DOCTARGETS)
 pkgconfig-data: $(ruby_pc)
 $(ruby_pc): $(srcdir)/template/ruby.pc.in config.status
@@ -951,15 +950,6 @@ known_errors.inc: $(srcdir)/template/known_errors.inc.tmpl $(srcdir)/defs/known_
 vm_call_iseq_optimized.inc: $(srcdir)/tool/mk_call_iseq_optimized.rb
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) $(srcdir)/tool/mk_call_iseq_optimized.rb > $@
-
-rb_mjit_header.h: PHONY probes.h
-	@$(ECHO) building $@
-	$(Q) $(BASERUBY) $(srcdir)/tool/generate_mjit_header.rb "$(PWD)" $(srcdir)/vm.c $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -DMJIT_HEADER
-	$(Q) (cmp vm.i $@ && echo $@ unchanged && $(RM) vm.i) || $(MV) vm.i $@
-
-$(MJIT_MIN_HEADER): rb_mjit_header.h $(srcdir)/tool/minimize_mjit_header.rb
-	@$(ECHO) building $@
-	$(BASERUBY) $(srcdir)/tool/minimize_mjit_header.rb "$(CC)" rb_mjit_header.h $@
 
 $(MINIPRELUDE_C): $(COMPILE_PRELUDE)
 	$(ECHO) generating $@
