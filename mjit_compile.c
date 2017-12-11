@@ -352,7 +352,10 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	b->stack_size += 1 - (unsigned int)operands[0];
         break;
       case YARVINSN_tostring:
-	fprintf(f, "  stack[%d] = rb_obj_as_string_result(stack[%d], stack[%d]);\n", b->stack_size-2, b->stack_size-1, b->stack_size-2);
+	fprintf(f, "  {\n");
+	fprintf(f, "    VALUE rb_obj_as_string_result(VALUE str, VALUE obj);\n");
+	fprintf(f, "    stack[%d] = rb_obj_as_string_result(stack[%d], stack[%d]);\n", b->stack_size-2, b->stack_size-1, b->stack_size-2);
+	fprintf(f, "  }\n");
 	b->stack_size--;
         break;
       case YARVINSN_freezestring:
