@@ -1422,7 +1422,7 @@ rb_obj_as_string(VALUE obj)
     return rb_obj_as_string_result(str, obj);
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_as_string_result(VALUE str, VALUE obj)
 {
     if (!RB_TYPE_P(str, T_STRING))
