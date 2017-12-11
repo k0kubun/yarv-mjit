@@ -868,13 +868,13 @@ mjit_init(struct mjit_options *opts)
     if (mjit_opts.cc == MJIT_CC_DEFAULT) {
 #if defined(_WIN32)
 	mjit_opts.cc = MJIT_CC_CL;
-	verbose(1, "MJIT: CC defaults to cl\n");
+	verbose(1, "MJIT: CC defaults to cl");
 #elif defined(__MACH__)
 	mjit_opts.cc = MJIT_CC_CLANG;
-	verbose(1, "MJIT: CC defaults to clang\n");
+	verbose(1, "MJIT: CC defaults to clang");
 #else
 	mjit_opts.cc = MJIT_CC_GCC;
-	verbose(1, "MJIT: CC defaults to gcc\n");
+	verbose(1, "MJIT: CC defaults to gcc");
 #endif
     }
 
