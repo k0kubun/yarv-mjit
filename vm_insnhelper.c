@@ -68,7 +68,6 @@ rb_ec_stack_overflow(rb_execution_context_t *ec, int crit)
 #endif
 }
 
-
 #if VM_CHECK_MODE > 0
 static int
 callable_class_p(VALUE klass)
@@ -240,7 +239,7 @@ vm_push_frame(rb_execution_context_t *ec,
     *sp++ = specval     /* ep[-1] / block handler or prev env ptr */;
     *sp   = type;       /* ep[-0] / ENV_FLAGS */
 
-    cfp->ep = sp;
+    cfp->ep = cfp->bp = sp;
     cfp->sp = sp + 1;
 
 #if VM_DEBUG_BP_CHECK
@@ -676,7 +675,6 @@ vm_cref_replace_with_duplicated_cref(const VALUE *ep)
 	rb_bug("vm_cref_dup: unreachable");
     }
 }
-
 
 static rb_cref_t *
 rb_vm_get_cref(const VALUE *ep)
@@ -1292,7 +1290,7 @@ vm_expandarray(rb_control_frame_t *cfp, VALUE ary, rb_num_t num, int flag)
 
 static VALUE vm_call_general(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc);
 
-static void
+RUBY_FUNC_EXPORTED void
 vm_search_method(const struct rb_call_info *ci, struct rb_call_cache *cc, VALUE recv)
 {
     VALUE klass = CLASS_OF(recv);
@@ -1455,7 +1453,7 @@ rb_eql_opt(VALUE obj1, VALUE obj2)
     return opt_eql_func(obj1, obj2, &ci, &cc);
 }
 
-static VALUE vm_call0(rb_execution_context_t *ec, VALUE, ID, int, const VALUE*, const rb_callable_method_entry_t *);
+extern VALUE vm_call0(rb_execution_context_t *ec, VALUE, ID, int, const VALUE*, const rb_callable_method_entry_t *);
 
 static VALUE
 check_match(rb_execution_context_t *ec, VALUE pattern, VALUE target, enum vm_check_match_type type)
@@ -1483,7 +1481,6 @@ check_match(rb_execution_context_t *ec, VALUE pattern, VALUE target, enum vm_che
 	rb_bug("check_match: unreachable");
     }
 }
-
 
 #if defined(_MSC_VER) && _MSC_VER < 1300
 #define CHECK_CMP_NAN(a, b) if (isnan(a) || isnan(b)) return Qfalse;
@@ -1559,9 +1556,9 @@ static inline VALUE vm_call_method(rb_execution_context_t *ec, rb_control_frame_
 
 static vm_call_handler vm_call_iseq_setup_func(const struct rb_call_info *ci, const int param_size, const int local_size);
 
-static rb_method_definition_t *method_definition_create(rb_method_type_t type, ID mid);
-static void method_definition_set(const rb_method_entry_t *me, rb_method_definition_t *def, void *opts);
-static int rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_definition_t *d2);
+extern rb_method_definition_t *method_definition_create(rb_method_type_t type, ID mid);
+extern void method_definition_set(const rb_method_entry_t *me, rb_method_definition_t *def, void *opts);
+extern int rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_definition_t *d2);
 
 static const rb_iseq_t *
 def_iseq_ptr(rb_method_definition_t *def)
@@ -1587,7 +1584,7 @@ vm_call_iseq_setup_normal_0start(rb_execution_context_t *ec, rb_control_frame_t 
     return vm_call_iseq_setup_normal(ec, cfp, calling, ci, cc, 0, param, local);
 }
 
-static inline int
+int
 simple_iseq_p(const rb_iseq_t *iseq)
 {
     return iseq->body->param.flags.has_opt == FALSE &&

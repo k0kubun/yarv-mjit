@@ -370,7 +370,7 @@ rb_setup_fake_str(struct RString *fake_str, const char *name, long len, rb_encod
     return setup_fake_str(fake_str, name, len, rb_enc_to_index(enc));
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_fstring_new(const char *ptr, long len)
 {
     struct RString fake_str;
@@ -2909,7 +2909,7 @@ rb_str_append(VALUE str, VALUE str2)
 
 #define MIN_PRE_ALLOC_SIZE 48
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_str_concat_literals(size_t num, const VALUE *strary)
 {
     VALUE str;
@@ -10127,7 +10127,7 @@ rb_str_quote_unprintable(VALUE str)
     return str;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_id_quote_unprintable(ID id)
 {
     return rb_str_quote_unprintable(rb_id2str(id));
@@ -10204,7 +10204,7 @@ sym_to_sym(VALUE sym)
     return sym;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_sym_proc_call(ID mid, int argc, const VALUE *argv, VALUE passed_proc)
 {
     VALUE obj;

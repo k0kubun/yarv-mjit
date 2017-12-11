@@ -197,7 +197,7 @@ rb_eql(VALUE obj1, VALUE obj2)
  * \private
  *++
  */
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_equal(VALUE obj1, VALUE obj2)
 {
     if (obj1 == obj2) return Qtrue;
@@ -216,7 +216,7 @@ VALUE rb_obj_hash(VALUE obj);
  *++
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_not(VALUE obj)
 {
     return RTEST(obj) ? Qfalse : Qtrue;
@@ -232,7 +232,7 @@ rb_obj_not(VALUE obj)
  *++
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_obj_not_equal(VALUE obj1, VALUE obj2)
 {
     VALUE result = rb_funcall(obj1, id_eq, 1, obj2);
@@ -303,7 +303,7 @@ rb_obj_singleton_class(VALUE obj)
 }
 
 /*! \private */
-void
+RUBY_FUNC_EXPORTED void
 rb_obj_copy_ivar(VALUE dest, VALUE obj)
 {
     if (!(RBASIC(dest)->flags & ROBJECT_EMBED) && ROBJECT_IVPTR(dest)) {
@@ -3018,7 +3018,7 @@ rb_check_convert_type(VALUE val, int type, const char *tname, const char *method
 }
 
 /*! \private */
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_check_convert_type_with_id(VALUE val, int type, const char *tname, ID method)
 {
     VALUE v;

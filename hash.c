@@ -434,7 +434,7 @@ rb_hash_new_compare_by_id(void)
     return hash;
 }
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_hash_new_with_size(st_index_t size)
 {
     VALUE ret = rb_hash_new();
@@ -486,7 +486,7 @@ rb_hash_tbl(VALUE hash)
     return hash_tbl(hash);
 }
 
-struct st_table *
+RUBY_FUNC_EXPORTED struct st_table *
 rb_hash_tbl_raw(VALUE hash)
 {
     return hash_tbl(hash);
@@ -2136,7 +2136,7 @@ keys_i(VALUE key, VALUE value, VALUE ary)
  *
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_hash_keys(VALUE hash)
 {
     VALUE keys;
@@ -2224,7 +2224,7 @@ rb_hash_values(VALUE hash)
  *  See also Enumerable#include?
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_hash_has_key(VALUE hash, VALUE key)
 {
     if (!RHASH(hash)->ntbl)
@@ -2930,7 +2930,7 @@ rb_hash_compare_by_id(VALUE hash)
  *
  */
 
-VALUE
+RUBY_FUNC_EXPORTED VALUE
 rb_hash_compare_by_id_p(VALUE hash)
 {
     if (!RHASH(hash)->ntbl)

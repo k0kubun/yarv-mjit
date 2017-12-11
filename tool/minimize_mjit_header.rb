@@ -67,7 +67,6 @@ module MJITHeader
     Tempfile.create(['', '.c']) do |f|
       f.puts code
       f.close
-      $stderr.puts "#{cc} #{cflags} #{f.path} 2>#{File::NULL}"
       unless system("#{cc} #{cflags} #{f.path} 2>#{File::NULL}")
         STDERR.puts "error in #{stage} header file:"
         system("#{cc} #{cflags} #{f.path}")
