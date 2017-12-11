@@ -621,7 +621,9 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    RUBY_VM_CHECK_INTS(ec);\n");
 	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[1]);
 	fprintf(f, "  }\n");
-        break;
+	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
+	next_pos = pos + insn_len(insn) + (unsigned int)operands[1];
+	break;
       case YARVINSN_getinlinecache:
 	fprintf(f, "  stack[%d] = vm_ic_hit_p(0x%"PRIxVALUE", cfp->ep);", b->stack_size, operands[1]);
 	fprintf(f, "  if (stack[%d] != Qnil) {\n", b->stack_size);
