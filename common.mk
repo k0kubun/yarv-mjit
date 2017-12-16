@@ -47,6 +47,8 @@ SIMPLECOV_HTML_GIT_URL = git://github.com/colszowka/simplecov-html.git
 SIMPLECOV_HTML_GIT_REF = v0.10.2
 DOCLIE_GIT_URL = git://github.com/ms-ati/docile.git
 DOCLIE_GIT_REF = v1.1.5
+OPTCARROT_GIT_URL = git://github.com/mame/optcarrot.git
+OPTCARROT_GIT_REF = master
 
 STATIC_RUBY   = static-ruby
 

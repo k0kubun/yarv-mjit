@@ -62,6 +62,7 @@ before_script:
   - "make -s $JOBS"
 
 script:
+  - "make -s optcarrot-bench RUN_OPTS=-j"
   - "make -s test TESTOPTS=--color=never"
   - "make -s $JOBS test-all -o exts TESTOPTS='-q --color=never --job-status=normal'"
   - "make -s $JOBS test-spec MSPECOPT=-j"
