@@ -520,6 +520,16 @@ update-simplecov:
 
 update-coverage: update-simplecov update-simplecov-html update-doclie
 
+update-optcarrot:
+	$(Q) $(srcdir)/tool/git-refresh $(Q1:0=-q) \
+		--branch $(OPTCARROT_GIT_REF)  \
+		$(OPTCARROT_GIT_URL) optcarrot $(GIT_OPTS)
+
+optcarrot: update-optcarrot
+
+optcarrot-bench: PHONY optcarrot main
+	$(Q) $(RUNRUBY) -I$(EXTOUT)/$(arch) optcarrot/bin/optcarrot --benchmark optcarrot/examples/Lan_Master.nes
+
 INSNS	= opt_sc.inc optinsn.inc optunifs.inc insns.inc insns_info.inc \
 	  vmtc.inc vm.inc
 
