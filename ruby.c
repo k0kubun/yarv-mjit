@@ -939,10 +939,8 @@ parse_mjit_cc(const char *s)
 	return MJIT_CC_GCC;
     } else if (strcmp(s, "clang") == 0) {
 	return MJIT_CC_CLANG;
-    } else if (strcmp(s, "cl") == 0) {
-	return MJIT_CC_CL;
     } else {
-	rb_raise(rb_eRuntimeError, "invalid CC `%s' (available CC: gcc, clang, cl)", s);
+	rb_raise(rb_eRuntimeError, "invalid CC `%s' (available CC: gcc, clang)", s);
     }
 }
 

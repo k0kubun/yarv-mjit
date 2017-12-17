@@ -33,8 +33,6 @@ enum rb_mjit_cc {
     MJIT_CC_GCC = 1,
     /* LLVM/Clang */
     MJIT_CC_CLANG = 2,
-    /* Visual Studio cl.exe */
-    MJIT_CC_CL = 3,
 };
 
 /* MJIT options which can be defined on the MRI command line.  */
