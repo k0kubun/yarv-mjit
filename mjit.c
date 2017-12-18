@@ -161,6 +161,8 @@ static const char *cc_path;
 static char *header_file;
 /* Name of the precompiled header file.  */
 static char *pch_file;
+/* Path of "/tmp", which can be changed to $TMP in MinGW. */
+static const char *tmp_dir;
 /* Ruby level interface module.  */
 VALUE rb_mMJIT;
 
@@ -189,10 +191,7 @@ get_string(const char *str)
 static void
 sprint_uniq_filename(char *str, unsigned long id, const char *prefix, const char *suffix)
 {
-    const char *tmp = getenv("TMP"); /* For MinGW */
-    if (tmp == NULL)
-	tmp = "/tmp";
-    sprintf(str, "%s/%sp%luu%lu%s", tmp, prefix, (unsigned long) getpid(), id, suffix);
+    sprintf(str, "%s/%sp%luu%lu%s", tmp_dir, prefix, (unsigned long) getpid(), id, suffix);
 }
 
 /* Return an unique file name in /tmp with PREFIX and SUFFIX and
@@ -854,6 +853,10 @@ mjit_init(struct mjit_options *opts)
     } else {
 	cc_path = GCC_PATH;
     }
+
+    tmp_dir = getenv("TMP"); /* For MinGW */
+    if (tmp_dir == NULL)
+	tmp_dir = "/tmp";
 
     init_header_filename();
     pch_file = get_uniq_filename(0, "_mjit_h", ".h.gch");
