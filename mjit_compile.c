@@ -460,7 +460,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "  stack[%d] = stack[%d];\n", b->stack_size-1, b->stack_size-1);
         break;
       case YARVINSN_topn:
-	fprintf(f, "  stack[%d] = stack[%d];\n", b->stack_size, b->stack_size - (unsigned int)operands[0]);
+	fprintf(f, "  stack[%d] = stack[%d];\n", b->stack_size, b->stack_size - 1 - (unsigned int)operands[0]);
 	b->stack_size++;
         break;
       case YARVINSN_setn:
