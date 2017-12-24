@@ -741,7 +741,7 @@ create_unit(const rb_iseq_t *iseq)
     if (unit == NULL)
 	return;
 
-    unit->id = current_unit_num++;
+    unit->id = -1;
     unit->iseq = iseq;
     iseq->body->jit_unit = unit;
 }
@@ -762,6 +762,7 @@ mjit_add_iseq_to_process(const rb_iseq_t *iseq)
 	return;
 
     CRITICAL_SECTION_START(3, "in add_iseq_to_process");
+    unit->id = current_unit_num++;
     add_to_unit_queue(unit);
     /* TODO: Unload some units if it's >= max_cache_size */
     verbose(3, "Sending wakeup signal to workers in mjit_add_iseq_to_process");
