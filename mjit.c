@@ -82,6 +82,7 @@
 #include "mjit.h"
 #include "version.h"
 #include "gc.h"
+#include "iseq.h"
 
 extern void native_mutex_lock(rb_nativethread_lock_t *lock);
 extern void native_mutex_unlock(rb_nativethread_lock_t *lock);
@@ -125,6 +126,7 @@ struct rb_mjit_unit {
     /* Units in lists are linked with the following members.  */
     struct rb_mjit_unit *next, *prev;
     const rb_iseq_t *iseq;
+    int sync;
 };
 
 /* TRUE if MJIT is initialized and will be used.  */
@@ -149,6 +151,8 @@ static rb_nativethread_cond_t mjit_client_wakeup;
 static rb_nativethread_cond_t mjit_worker_wakeup;
 /* A thread conditional to wake up workers if at the end of GC.  */
 static rb_nativethread_cond_t mjit_gc_wakeup;
+/* A thread conditional to wake up ruby thread if main worker loop is executed.  */
+static rb_nativethread_cond_t mjit_worker_executed;
 /* True when GC is working.  */
 static int in_gc;
 /* True when JIT is working.  */
@@ -446,7 +450,7 @@ best_unit_from_unit_queue()
 	    continue;
 	}
 
-	if (best == NULL || best->iseq->body->total_calls < unit->iseq->body->total_calls) {
+	if (best == NULL || best->sync < unit->sync || best->iseq->body->total_calls < unit->iseq->body->total_calls) {
 	    best = unit;
 	}
     }
@@ -724,6 +728,9 @@ worker()
 	    remove_from_unit_queue(unit);
 	    CRITICAL_SECTION_FINISH(3, "in jit func replace");
 	}
+	CRITICAL_SECTION_START(3, "in worker executed");
+	native_cond_signal(&mjit_worker_executed);
+	CRITICAL_SECTION_FINISH(3, "in worker executed");
     }
 
     CRITICAL_SECTION_START(3, "in the end of worker to update worker_finished");
@@ -742,6 +749,7 @@ create_unit(const rb_iseq_t *iseq)
 	return;
 
     unit->id = -1;
+    unit->sync = 0;
     unit->iseq = iseq;
     iseq->body->jit_unit = unit;
 }
@@ -873,6 +881,7 @@ mjit_init(struct mjit_options *opts)
     native_cond_initialize(&mjit_client_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
     native_cond_initialize(&mjit_worker_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
     native_cond_initialize(&mjit_gc_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
+    native_cond_initialize(&mjit_worker_executed, RB_CONDATTR_CLOCK_MONOTONIC);
 
     /* Initialize worker thread */
     finish_worker_p = FALSE;
@@ -884,6 +893,7 @@ mjit_init(struct mjit_options *opts)
 	native_cond_destroy(&mjit_client_wakeup);
 	native_cond_destroy(&mjit_worker_wakeup);
 	native_cond_destroy(&mjit_gc_wakeup);
+	native_cond_destroy(&mjit_worker_executed);
 	verbose(1, "Failure in MJIT thread initialization\n");
     }
 }
@@ -925,6 +935,7 @@ mjit_finish()
     native_cond_destroy(&mjit_client_wakeup);
     native_cond_destroy(&mjit_worker_wakeup);
     native_cond_destroy(&mjit_gc_wakeup);
+    native_cond_destroy(&mjit_worker_executed);
 
     /* cleanup temps */
     if (!mjit_opts.save_temps)
@@ -961,9 +972,42 @@ mjit_enable_get(void)
   return mjit_init_p ? Qtrue : Qfalse;
 }
 
+VALUE
+mjit_s_compile(VALUE recv, VALUE iseqw)
+{
+    struct rb_mjit_unit *unit;
+    const rb_iseq_t *iseq;
+
+    if (!mjit_init_p)
+	return Qnil;
+
+    iseq = rb_iseqw_to_iseq(iseqw);
+    CRITICAL_SECTION_START(3, "mjit_s_compile");
+    if ((unit = iseq->body->jit_unit) == NULL) {
+	create_unit(iseq);
+	if ((unit = iseq->body->jit_unit) == NULL)
+	    /* Failure in creating the unit.  */
+	    return Qfalse;
+
+        unit->id = current_unit_num++;
+        add_to_unit_queue(unit);
+    }
+    unit->sync = 1;
+    native_cond_broadcast(&mjit_worker_wakeup);
+    CRITICAL_SECTION_FINISH(3, "mjit_s_compile");
+
+    CRITICAL_SECTION_START(3, "wait mjit_s_compile");
+    while ((ptrdiff_t)iseq->body->jit_func <= (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
+	native_cond_wait(&mjit_worker_executed, &mjit_engine_mutex);
+    };
+    CRITICAL_SECTION_FINISH(3, "wait mjit_s_compile");
+    return iseqw;
+}
+
 void
 Init_MJIT(void)
 {
     rb_mMJIT = rb_define_module("MJIT");
     rb_define_singleton_method(rb_mMJIT, "enabled?", mjit_enable_get, 0);
+    rb_define_singleton_method(rb_mMJIT, "compile", mjit_s_compile, 1);
 }
