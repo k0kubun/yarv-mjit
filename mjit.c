@@ -116,20 +116,25 @@ typedef intptr_t pid_t;
    freed. */
 struct mjit_options mjit_opts;
 
-/* The unit structure.  */
+/* The unit structure that holds metadata of ISeq for MJIT.  */
 struct rb_mjit_unit {
     /* Unique order number of unit.  */
     int id;
     /* Dlopen handle of the loaded object file.  */
     void *handle;
-    /* Units in lists are linked with the following members.  */
-    struct rb_mjit_unit *next, *prev;
     const rb_iseq_t *iseq;
 };
 
-/* Linked list of units.  */
+/* Node of linked list in struct rb_mjit_unit_list. */
+struct rb_mjit_unit_node {
+    struct rb_mjit_unit *unit;
+    struct rb_mjit_unit_node *next, *prev;
+};
+
+/* Linked list of struct rb_mjit_unit.  */
 struct rb_mjit_unit_list {
-    struct rb_mjit_unit *head;
+    struct rb_mjit_unit_node *head;
+    int length; /* the list length */
 };
 
 /* TRUE if MJIT is initialized and will be used.  */
@@ -138,10 +143,10 @@ int mjit_init_p = FALSE;
 /* Priority queue of iseqs waiting for JIT compilation.
    This variable is a pointer to head unit of the queue. */
 static struct rb_mjit_unit_list unit_queue;
+/* List of units which are successfully compiled. */
+static struct rb_mjit_unit_list active_units;
 /* The number of so far processed ISEQs, used to generate unique id.  */
 static int current_unit_num;
-/* The number of successfully compiled ISEQs.  */
-static int active_unit_num;
 /* A mutex for conitionals and critical sections.  */
 static rb_nativethread_lock_t mjit_engine_mutex;
 /* A thread conditional to wake up `mjit_finish` at the end of PCH thread.  */
@@ -402,6 +407,7 @@ static void
 init_list(struct rb_mjit_unit_list *list)
 {
     list->head = NULL;
+    list->length = 0;
 }
 
 /* Add unit UNIT to the tail of doubly linked LIST.  It should be not in
@@ -409,60 +415,79 @@ init_list(struct rb_mjit_unit_list *list)
 static void
 add_to_list(struct rb_mjit_unit *unit, struct rb_mjit_unit_list *list)
 {
+    struct rb_mjit_unit_node *node = ZALLOC(struct rb_mjit_unit_node);
+    node->unit = unit;
+
     /* Append iseq to list */
     if (list->head == NULL) {
-	list->head = unit;
+	list->head = node;
     } else {
-	struct rb_mjit_unit *tail = list->head;
+	struct rb_mjit_unit_node *tail = list->head;
 	while (tail->next != NULL) {
 	    tail = tail->next;
 	}
-	tail->next = unit;
-	unit->prev = tail;
+	tail->next = node;
+	node->prev = tail;
     }
+    list->length++;
 }
 
 static void
-remove_from_list(struct rb_mjit_unit *unit, struct rb_mjit_unit_list *list)
+remove_from_list(struct rb_mjit_unit_node *node, struct rb_mjit_unit_list *list)
 {
-    if (unit->prev && unit->next) {
-	unit->prev->next = unit->next;
-	unit->next->prev = unit->prev;
-    } else if (unit->prev == NULL && unit->next) {
-	list->head = unit->next;
-	unit->next->prev = NULL;
-    } else if (unit->prev && unit->next == NULL) {
-	unit->prev->next = NULL;
+    if (node->prev && node->next) {
+	node->prev->next = node->next;
+	node->next->prev = node->prev;
+    } else if (node->prev == NULL && node->next) {
+	list->head = node->next;
+	node->next->prev = NULL;
+    } else if (node->prev && node->next == NULL) {
+	node->prev->next = NULL;
     } else {
 	list->head = NULL;
     }
+    list->length--;
+    xfree(node);
 }
 
-/* Return and remove the best unit from list.  The best is the first
+/* Return the best unit from list.  The best is the first
    high priority unit or the unit whose iseq has the biggest number
    of calls so far.  */
-static struct rb_mjit_unit *
+static struct rb_mjit_unit_node *
 get_from_list(struct rb_mjit_unit_list *list)
 {
-    struct rb_mjit_unit *unit, *best = NULL;
+    struct rb_mjit_unit_node *node, *best = NULL;
 
     if (list->head == NULL)
 	return NULL;
 
     /* Find iseq with max total_calls */
-    for (unit = list->head; unit != NULL; unit = unit ? unit->next : NULL) {
-	if (unit->iseq == NULL) { /* ISeq is GCed. */
-	    remove_from_list(unit, list);
-	    free(unit);
+    for (node = list->head; node != NULL; node = node ? node->next : NULL) {
+	if (node->unit->iseq == NULL) { /* ISeq is GCed. */
+	    remove_from_list(node, list);
 	    continue;
 	}
 
-	if (best == NULL || best->iseq->body->total_calls < unit->iseq->body->total_calls) {
-	    best = unit;
+	if (best == NULL || best->unit->iseq->body->total_calls < node->unit->iseq->body->total_calls) {
+	    best = node;
 	}
     }
 
     return best;
+}
+
+/* Free unit list. This should be called only when worker is finished
+   because node of unit_queue and one of active_units may have the same unit
+   during proceeding unit. */
+static void
+free_list(struct rb_mjit_unit_list *list)
+{
+    struct rb_mjit_unit_node *node, *next;
+    for (node = list->head; node != NULL; node = next) {
+	next = node->next;
+	xfree(node->unit);
+	xfree(node);
+    }
 }
 
 /* XXX_COMMONN_ARGS define the command line arguments of XXX C
@@ -679,7 +704,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 
     if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
 	CRITICAL_SECTION_START(3, "end of jit");
-	active_unit_num++;
+	add_to_list(unit, &active_units);
 	if (unit->iseq)
 	    verbose(1, "JIT success (%.1fms): %s@%s:%d -> %s", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
 		    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
@@ -712,27 +737,26 @@ worker()
 
     /* main worker loop */
     while (!finish_worker_p) {
-	struct rb_mjit_unit *unit;
+	struct rb_mjit_unit_node *node;
 
 	/* wait until unit is available */
 	CRITICAL_SECTION_START(3, "in worker dequeue");
-	while ((unit_queue.head == NULL || active_unit_num > mjit_opts.max_cache_size) && !finish_worker_p) {
+	while ((unit_queue.head == NULL || active_units.length > mjit_opts.max_cache_size) && !finish_worker_p) {
 	    native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
 	    verbose(3, "Getting wakeup from client");
 	}
-	unit = get_from_list(&unit_queue);
+	node = get_from_list(&unit_queue);
 	CRITICAL_SECTION_FINISH(3, "in worker dequeue");
 
-	if (unit) {
-	    void *func;
-	    func = convert_unit_to_func(unit);
+	if (node) {
+	    void *func = convert_unit_to_func(node->unit);
 
 	    CRITICAL_SECTION_START(3, "in jit func replace");
-	    if (unit->iseq) { /* Check whether GCed or not */
+	    if (node->unit->iseq) { /* Check whether GCed or not */
 		/* Usage of jit_code might be not in a critical section.  */
-		ATOMIC_SET(unit->iseq->body->jit_func, func);
+		ATOMIC_SET(node->unit->iseq->body->jit_func, func);
 	    }
-	    remove_from_list(unit, &unit_queue);
+	    remove_from_list(node, &unit_queue);
 	    CRITICAL_SECTION_FINISH(3, "in jit func replace");
 	}
     }
@@ -878,6 +902,7 @@ mjit_init(struct mjit_options *opts)
     }
 
     init_list(&unit_queue);
+    init_list(&active_units);
 
     /* Initialize mutex */
     native_mutex_initialize(&mjit_engine_mutex);
@@ -944,7 +969,9 @@ mjit_finish()
 
     xfree(pch_file); pch_file = NULL;
     xfree(header_file); header_file = NULL;
-    /* TODO: free unit_queue */
+
+    free_list(&unit_queue);
+    free_list(&active_units);
 
     mjit_init_p = FALSE;
     verbose(1, "Successful MJIT finish");
@@ -953,14 +980,14 @@ mjit_finish()
 void
 mjit_mark(void)
 {
-    struct rb_mjit_unit *unit;
+    struct rb_mjit_unit_node *node;
     if (!mjit_init_p)
 	return;
     RUBY_MARK_ENTER("mjit");
     CRITICAL_SECTION_START(4, "mjit_mark");
-    for(unit = unit_queue.head; unit; unit = unit->next) {
-	if (unit->iseq) {
-	    rb_gc_mark((VALUE)unit->iseq);
+    for (node = unit_queue.head; node != NULL; node = node->next) {
+	if (node->unit->iseq) { /* ISeq is still not GCed */
+	    rb_gc_mark((VALUE)node->unit->iseq);
 	}
     }
     CRITICAL_SECTION_FINISH(4, "mjit_mark");
@@ -970,7 +997,7 @@ mjit_mark(void)
 VALUE
 mjit_enable_get(void)
 {
-  return mjit_init_p ? Qtrue : Qfalse;
+    return mjit_init_p ? Qtrue : Qfalse;
 }
 
 void
