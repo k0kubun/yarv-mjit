@@ -1779,6 +1779,11 @@ iseqw_s_of(VALUE klass, VALUE body)
     return iseq ? iseqw_new(iseq) : Qnil;
 }
 
+VALUE
+rb_iseqw_of(VALUE obj) {
+    return iseqw_s_of(rb_cISeq, obj);
+}
+
 /*
  *  call-seq:
  *     InstructionSequence.disasm(body) -> str

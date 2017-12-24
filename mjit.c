@@ -973,13 +973,21 @@ mjit_enable_get(void)
 }
 
 VALUE
-mjit_s_compile(VALUE recv, VALUE iseqw)
+mjit_s_compile(VALUE recv, VALUE obj)
 {
     struct rb_mjit_unit *unit;
     const rb_iseq_t *iseq;
+    VALUE iseqw;
 
     if (!mjit_init_p)
 	return Qnil;
+
+    if (!rb_obj_is_iseq(obj)) {
+	iseqw = rb_iseqw_of(obj);
+    }
+    else {
+	iseqw = obj;
+    }
 
     iseq = rb_iseqw_to_iseq(iseqw);
     CRITICAL_SECTION_START(3, "mjit_s_compile");

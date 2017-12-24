@@ -189,6 +189,7 @@ VALUE rb_iseq_label(const rb_iseq_t *iseq);
 VALUE rb_iseq_base_label(const rb_iseq_t *iseq);
 VALUE rb_iseq_first_lineno(const rb_iseq_t *iseq);
 VALUE rb_iseq_method_name(const rb_iseq_t *iseq);
+VALUE rb_iseqw_of(VALUE obj);
 
 /* proc.c */
 const rb_iseq_t *rb_method_iseq(VALUE body);
