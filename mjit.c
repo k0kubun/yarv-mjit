@@ -127,12 +127,17 @@ struct rb_mjit_unit {
     const rb_iseq_t *iseq;
 };
 
+/* Linked list of units.  */
+struct rb_mjit_unit_list {
+    struct rb_mjit_unit *head;
+};
+
 /* TRUE if MJIT is initialized and will be used.  */
 int mjit_init_p = FALSE;
 
 /* Priority queue of iseqs waiting for JIT compilation.
    This variable is a pointer to head unit of the queue. */
-static struct rb_mjit_unit *unit_queue;
+static struct rb_mjit_unit_list unit_queue;
 /* The number of so far processed ISEQs, used to generate unique id.  */
 static int current_unit_num;
 /* The number of successfully compiled ISEQs.  */
@@ -393,16 +398,22 @@ mjit_free_iseq(const rb_iseq_t *iseq)
     CRITICAL_SECTION_FINISH(4, "mjit_free_iseq");
 }
 
+static void
+init_list(struct rb_mjit_unit_list *list)
+{
+    list->head = NULL;
+}
+
 /* Add unit UNIT to the tail of doubly linked LIST.  It should be not in
    the list before.  */
 static void
-add_to_unit_queue(struct rb_mjit_unit *unit)
+add_to_list(struct rb_mjit_unit *unit, struct rb_mjit_unit_list *list)
 {
     /* Append iseq to list */
-    if (unit_queue == NULL) {
-	unit_queue = unit;
+    if (list->head == NULL) {
+	list->head = unit;
     } else {
-	struct rb_mjit_unit *tail = unit_queue;
+	struct rb_mjit_unit *tail = list->head;
 	while (tail->next != NULL) {
 	    tail = tail->next;
 	}
@@ -412,36 +423,36 @@ add_to_unit_queue(struct rb_mjit_unit *unit)
 }
 
 static void
-remove_from_unit_queue(struct rb_mjit_unit *unit)
+remove_from_list(struct rb_mjit_unit *unit, struct rb_mjit_unit_list *list)
 {
     if (unit->prev && unit->next) {
 	unit->prev->next = unit->next;
 	unit->next->prev = unit->prev;
     } else if (unit->prev == NULL && unit->next) {
-	unit_queue = unit->next;
+	list->head = unit->next;
 	unit->next->prev = NULL;
     } else if (unit->prev && unit->next == NULL) {
 	unit->prev->next = NULL;
     } else {
-	unit_queue = NULL;
+	list->head = NULL;
     }
 }
 
-/* Return the best unit from unit_queue.  The best
-   is the first high priority unit or the unit whose iseq has the
-   biggest number of calls so far.  */
+/* Return and remove the best unit from list.  The best is the first
+   high priority unit or the unit whose iseq has the biggest number
+   of calls so far.  */
 static struct rb_mjit_unit *
-best_unit_from_unit_queue()
+get_from_list(struct rb_mjit_unit_list *list)
 {
     struct rb_mjit_unit *unit, *best = NULL;
 
-    if (unit_queue == NULL)
+    if (list->head == NULL)
 	return NULL;
 
     /* Find iseq with max total_calls */
-    for (unit = unit_queue; unit != NULL; unit = unit ? unit->next : NULL) {
+    for (unit = list->head; unit != NULL; unit = unit ? unit->next : NULL) {
 	if (unit->iseq == NULL) { /* ISeq is GCed. */
-	    remove_from_unit_queue(unit);
+	    remove_from_list(unit, list);
 	    free(unit);
 	    continue;
 	}
@@ -705,11 +716,11 @@ worker()
 
 	/* wait until unit is available */
 	CRITICAL_SECTION_START(3, "in worker dequeue");
-	while ((unit_queue == NULL || active_unit_num > mjit_opts.max_cache_size) && !finish_worker_p) {
+	while ((unit_queue.head == NULL || active_unit_num > mjit_opts.max_cache_size) && !finish_worker_p) {
 	    native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
 	    verbose(3, "Getting wakeup from client");
 	}
-	unit = best_unit_from_unit_queue();
+	unit = get_from_list(&unit_queue);
 	CRITICAL_SECTION_FINISH(3, "in worker dequeue");
 
 	if (unit) {
@@ -721,7 +732,7 @@ worker()
 		/* Usage of jit_code might be not in a critical section.  */
 		ATOMIC_SET(unit->iseq->body->jit_func, func);
 	    }
-	    remove_from_unit_queue(unit);
+	    remove_from_list(unit, &unit_queue);
 	    CRITICAL_SECTION_FINISH(3, "in jit func replace");
 	}
     }
@@ -762,7 +773,7 @@ mjit_add_iseq_to_process(const rb_iseq_t *iseq)
 	return;
 
     CRITICAL_SECTION_START(3, "in add_iseq_to_process");
-    add_to_unit_queue(unit);
+    add_to_list(unit, &unit_queue);
     /* TODO: Unload some units if it's >= max_cache_size */
     verbose(3, "Sending wakeup signal to workers in mjit_add_iseq_to_process");
     native_cond_broadcast(&mjit_worker_wakeup);
@@ -866,6 +877,8 @@ mjit_init(struct mjit_options *opts)
 	return;
     }
 
+    init_list(&unit_queue);
+
     /* Initialize mutex */
     native_mutex_initialize(&mjit_engine_mutex);
     native_cond_initialize(&mjit_pch_wakeup, RB_CONDATTR_CLOCK_MONOTONIC);
@@ -945,7 +958,7 @@ mjit_mark(void)
 	return;
     RUBY_MARK_ENTER("mjit");
     CRITICAL_SECTION_START(4, "mjit_mark");
-    for(unit = unit_queue; unit; unit = unit->next) {
+    for(unit = unit_queue.head; unit; unit = unit->next) {
 	if (unit->iseq) {
 	    rb_gc_mark((VALUE)unit->iseq);
 	}
