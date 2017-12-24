@@ -839,6 +839,11 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
 	fprintf(f, "  }\n");
     }
 
+    /* ISeq might be used for catch table too. For that usage, this code cancels JIT execution. */
+    fprintf(f, "  if (cfp->pc != 0x%"PRIxVALUE") {\n", (VALUE)body->iseq_encoded);
+    fprintf(f, "    return Qundef;\n");
+    fprintf(f, "  }\n");
+
     compile_insns(f, body, 0, 0, &status);
     compile_cancel_handler(f, body);
     fprintf(f, "}\n");
