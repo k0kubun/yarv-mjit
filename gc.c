@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include "ruby_assert.h"
 #include "debug_counter.h"
+#include "mjit.h"
 
 #undef rb_data_object_wrap
 
@@ -6607,6 +6608,8 @@ gc_enter(rb_objspace_t *objspace, const char *event)
     GC_ASSERT(during_gc == 0);
     if (RGENGC_CHECK_MODE >= 3) gc_verify_internal_consistency(Qnil);
 
+    mjit_gc_start_hook();
+
     during_gc = TRUE;
     gc_report(1, objspace, "gc_entr: %s [%s]\n", event, gc_current_status(objspace));
     gc_record(objspace, 0, event);
@@ -6622,6 +6625,8 @@ gc_exit(rb_objspace_t *objspace, const char *event)
     gc_record(objspace, 1, event);
     gc_report(1, objspace, "gc_exit: %s [%s]\n", event, gc_current_status(objspace));
     during_gc = FALSE;
+
+    mjit_gc_finish_hook();
 }
 
 static void *

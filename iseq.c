@@ -25,6 +25,7 @@
 
 #include "insns.inc"
 #include "insns_info.inc"
+#include "mjit.h"
 
 VALUE rb_cISeq;
 static VALUE iseqw_new(const rb_iseq_t *iseq);
@@ -72,6 +73,7 @@ rb_iseq_free(const rb_iseq_t *iseq)
     RUBY_FREE_ENTER("iseq");
 
     if (iseq) {
+	mjit_free_iseq(iseq); /* Notify MJIT */
 	if (iseq->body) {
 	    ruby_xfree((void *)iseq->body->iseq_encoded);
 	    ruby_xfree((void *)iseq->body->insns_info);
