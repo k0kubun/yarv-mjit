@@ -82,6 +82,7 @@
 #include "mjit.h"
 #include "version.h"
 #include "gc.h"
+#include "ruby_assert.h"
 
 extern void native_mutex_lock(rb_nativethread_lock_t *lock);
 extern void native_mutex_unlock(rb_nativethread_lock_t *lock);
@@ -102,6 +103,7 @@ extern int rb_thread_create_mjit_thread(void (*child_hook)(void), void (*worker_
 #define dlopen(name,flag) ((void*)LoadLibrary(name))
 #define dlerror() strerror(rb_w32_map_errno(GetLastError()))
 #define dlsym(handle,name) ((void*)GetProcAddress((handle),(name)))
+#define dlclose(handle) (CloseHandle(handle))
 #define RTLD_NOW  -1
 
 #define waitpid(pid,stat_loc,options) (WaitForSingleObject((pid), INFINITE), GetExitCodeProcess((pid), (stat_loc)))
@@ -123,6 +125,8 @@ struct rb_mjit_unit {
     /* Dlopen handle of the loaded object file.  */
     void *handle;
     const rb_iseq_t *iseq;
+    /* Only used by unload_units. Flag to check this unit is currently on stack or not. */
+    char used_code_p;
 };
 
 /* Node of linked list in struct rb_mjit_unit_list. */
@@ -397,10 +401,21 @@ mjit_free_iseq(const rb_iseq_t *iseq)
 	return;
     CRITICAL_SECTION_START(4, "mjit_free_iseq");
     if (iseq->body->jit_unit) {
+	/* jit_unit is not freed here because it may be referred by multiple
+	   lists of units. `get_from_list` and `mjit_finish` do the job. */
 	iseq->body->jit_unit->iseq = NULL;
     }
-    /* TODO: unload unit */
     CRITICAL_SECTION_FINISH(4, "mjit_free_iseq");
+}
+
+static void
+free_unit(struct rb_mjit_unit *unit)
+{
+    if (unit->iseq) /* ISeq is not GCed */
+	unit->iseq->body->jit_func = NULL;
+    if (unit->handle) /* handle is NULL if it's in queue */
+	dlclose(unit->handle);
+    xfree(unit);
 }
 
 static void
@@ -472,6 +487,7 @@ get_from_list(struct rb_mjit_unit_list *list)
     /* Find iseq with max total_calls */
     for (node = list->head; node != NULL; node = node ? node->next : NULL) {
 	if (node->unit->iseq == NULL) { /* ISeq is GCed. */
+	    free_unit(node->unit);
 	    remove_from_list(node, list);
 	    continue;
 	}
@@ -493,7 +509,7 @@ free_list(struct rb_mjit_unit_list *list)
     struct rb_mjit_unit_node *node, *next;
     for (node = list->head; node != NULL; node = next) {
 	next = node->next;
-	xfree(node->unit);
+	free_unit(node->unit);
 	xfree(node);
     }
 }
@@ -623,7 +639,6 @@ load_func_from_so(const char *so_file, const char *funcname, struct rb_mjit_unit
     }
 
     func = dlsym(handle, funcname);
-    /* TODO: dlclose(handle); on unloading or GCing ISeq */
     unit->handle = handle;
     return func;
 }
@@ -775,6 +790,71 @@ worker()
     CRITICAL_SECTION_FINISH(3, "in the end of worker to update worker_finished");
 }
 
+/* MJIT info related to an existing continutaion.  */
+struct mjit_cont {
+    rb_execution_context_t *ec; /* continuation ec */
+    struct mjit_cont *prev, *next; /* used to form lists */
+};
+
+/* Double linked list of registered continuations. This is used to detect
+   units which are in use in unload_units. */
+static struct mjit_cont *first_cont;
+
+/* Register a new continuation with thread TH.  Return MJIT info about
+   the continuation.  */
+struct mjit_cont *
+mjit_cont_new(rb_execution_context_t *ec)
+{
+    struct mjit_cont *cont;
+
+    cont = ZALLOC(struct mjit_cont);
+    cont->ec = ec;
+
+    CRITICAL_SECTION_START(3, "in mjit_cont_new");
+    if (first_cont == NULL) {
+	cont->next = cont->prev = NULL;
+    } else {
+	cont->prev = NULL;
+	cont->next = first_cont;
+	first_cont->prev = cont;
+    }
+    first_cont = cont;
+    CRITICAL_SECTION_FINISH(3, "in mjit_cont_new");
+
+    return cont;
+}
+
+/* Unregister continuation CONT.  */
+void
+mjit_cont_free(struct mjit_cont *cont)
+{
+    CRITICAL_SECTION_START(3, "in mjit_cont_new");
+    if (cont == first_cont) {
+	first_cont = cont->next;
+	if (first_cont != NULL)
+	    first_cont->prev = NULL;
+    } else {
+	cont->prev->next = cont->next;
+	if (cont->next != NULL)
+	    cont->next->prev = cont->prev;
+    }
+    CRITICAL_SECTION_FINISH(3, "in mjit_cont_new");
+
+    xfree(cont);
+}
+
+/* Finish work with continuation info. */
+static void
+finish_conts(void)
+{
+    struct mjit_cont *cont, *next;
+
+    for (cont = first_cont; cont != NULL; cont = next) {
+	next = cont->next;
+	xfree(cont);
+    }
+}
+
 /* Create unit for ISEQ. */
 static void
 create_unit(const rb_iseq_t *iseq)
@@ -788,6 +868,92 @@ create_unit(const rb_iseq_t *iseq)
     unit->id = current_unit_num++;
     unit->iseq = iseq;
     iseq->body->jit_unit = unit;
+}
+
+/* Set up field used_code_p for unit iseqs whose iseq on the stack of ec. */
+static void
+mark_ec_units(rb_execution_context_t *ec)
+{
+    const rb_iseq_t *iseq;
+    const rb_control_frame_t *cfp;
+    rb_control_frame_t *last_cfp = ec->cfp;
+    const rb_control_frame_t *end_marker_cfp;
+    ptrdiff_t i, size;
+
+    if (ec->vm_stack == NULL)
+	return;
+    end_marker_cfp = RUBY_VM_END_CONTROL_FRAME(ec);
+    size = end_marker_cfp - last_cfp;
+    for (i = 0, cfp = end_marker_cfp - 1; i < size; i++, cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
+	if (cfp->pc && (iseq = cfp->iseq) != NULL
+	    && imemo_type((VALUE) iseq) == imemo_iseq
+	    && (iseq->body->jit_unit) != NULL) {
+	    iseq->body->jit_unit->used_code_p = TRUE;
+	}
+    }
+}
+
+/* Unload JIT code of some units to satisfy the maximum permitted
+   number of units with a loaded code.  */
+static void
+unload_units(void)
+{
+    rb_vm_t *vm = GET_THREAD()->vm;
+    rb_thread_t *th = NULL;
+    struct rb_mjit_unit_node *node, *next, *worst_node;
+    struct rb_mjit_unit *unit;
+    struct mjit_cont *cont;
+    int delete_num, units_num = active_units.length;
+
+    /* For now, we don't unload units when ISeq is GCed. We should
+       unload such ISeqs first here. */
+    for (node = active_units.head; node != NULL; node = next) {
+	next = node->next;
+	if (node->unit->iseq == NULL) { /* ISeq is GCed. */
+	    free_unit(node->unit);
+	    remove_from_list(node, &active_units);
+	}
+    }
+
+    /* Detect units which are in use and can't be unloaded. */
+    for (node = active_units.head; node != NULL; node = node->next) {
+	assert(node->unit != NULL && node->unit->iseq != NULL && node->unit->handle != NULL);
+	node->unit->used_code_p = FALSE;
+    }
+    list_for_each(&vm->living_threads, th, vmlt_node) {
+	mark_ec_units(th->ec);
+    }
+    for (cont = first_cont; cont != NULL; cont = cont->next) {
+	mark_ec_units(cont->ec);
+    }
+
+    /* Remove 1/10 units more to decrease unloading calls.  */
+    delete_num = active_units.length / 10;
+    for (; active_units.length > mjit_opts.max_cache_size - delete_num;) {
+	/* Find one unit that has the minimum total_calls. */
+	worst_node = NULL;
+	for (node = active_units.head; node != NULL; node = node->next) {
+	    if (node->unit->used_code_p) /* We can't unload code on stack. */
+		continue;
+
+	    if (worst_node == NULL || worst_node->unit->iseq->body->total_calls > node->unit->iseq->body->total_calls) {
+		worst_node = node;
+	    }
+	}
+	if (worst_node == NULL)
+	    break;
+
+	/* Unload the worst node. */
+	verbose(2, "Unloading unit %d (calls=%lu)", worst_node->unit->id, worst_node->unit->iseq->body->total_calls);
+	unit = worst_node->unit;
+	unit->iseq->body->jit_func = (void *)NOT_READY_JIT_ISEQ_FUNC;
+	remove_from_list(worst_node, &active_units);
+
+	assert(unit->handle != NULL);
+	dlclose(unit->handle);
+	unit->handle = NULL;
+    }
+    verbose(1, "Too many JIT code -- %d units unloaded", units_num - active_units.length);
 }
 
 /* Add ISEQ to be JITed in parallel with the current thread.
@@ -808,7 +974,9 @@ mjit_add_iseq_to_process(const rb_iseq_t *iseq)
     node = create_list_node(iseq->body->jit_unit);
     CRITICAL_SECTION_START(3, "in add_iseq_to_process");
     add_to_list(node, &unit_queue);
-    /* TODO: Unload some units if it's >= max_cache_size */
+    if (active_units.length >= mjit_opts.max_cache_size) {
+	unload_units();
+    }
     verbose(3, "Sending wakeup signal to workers in mjit_add_iseq_to_process");
     native_cond_broadcast(&mjit_worker_wakeup);
     CRITICAL_SECTION_FINISH(3, "in add_iseq_to_process");
@@ -982,6 +1150,7 @@ mjit_finish()
 
     free_list(&unit_queue);
     free_list(&active_units);
+    finish_conts();
 
     mjit_init_p = FALSE;
     verbose(1, "Successful MJIT finish");
