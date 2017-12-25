@@ -292,17 +292,22 @@ static void vm_collect_usage_register(int reg, int isset);
 #endif
 
 static VALUE vm_make_env_object(const rb_execution_context_t *ec, rb_control_frame_t *cfp);
-static VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
+extern VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 static VALUE vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 
 #include "mjit.h"
 #include "vm_insnhelper.h"
 #include "vm_exec.h"
 #include "vm_insnhelper.c"
+
+#ifndef MJIT_HEADER
+
 #include "vm_exec.c"
 
 #include "vm_method.c"
+#endif /* #ifndef MJIT_HEADER */
 #include "vm_eval.c"
+#ifndef MJIT_HEADER
 
 #define PROCDEBUG 0
 
@@ -496,7 +501,7 @@ rb_vm_get_binding_creatable_next_cfp(const rb_execution_context_t *ec, const rb_
     return 0;
 }
 
-rb_control_frame_t *
+MJIT_FUNC_EXPORTED rb_control_frame_t *
 rb_vm_get_ruby_level_next_cfp(const rb_execution_context_t *ec, const rb_control_frame_t *cfp)
 {
     if (RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(ec, cfp)) bp();
@@ -508,6 +513,8 @@ rb_vm_get_ruby_level_next_cfp(const rb_execution_context_t *ec, const rb_control
     }
     return 0;
 }
+
+#endif /* #ifndef MJIT_HEADER */
 
 static rb_control_frame_t *
 vm_get_ruby_level_caller_cfp(const rb_execution_context_t *ec, const rb_control_frame_t *cfp)
@@ -542,6 +549,8 @@ rb_vm_pop_cfunc_frame(void)
     RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, me->def->original_id);
     vm_pop_frame(ec, cfp, cfp->ep);
 }
+
+#ifndef MJIT_HEADER
 
 void
 rb_vm_rewind_cfp(rb_execution_context_t *ec, rb_control_frame_t *cfp)
@@ -867,7 +876,7 @@ rb_proc_create(VALUE klass, const struct rb_block *block,
     return procval;
 }
 
-VALUE
+MJIT_FUNC_EXPORTED VALUE
 rb_vm_make_proc_lambda(const rb_execution_context_t *ec, const struct rb_captured_block *captured, VALUE klass, int8_t is_lambda)
 {
     VALUE procval;
@@ -1159,14 +1168,14 @@ vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self,
     return val;
 }
 
-static VALUE
+MJIT_FUNC_EXPORTED VALUE
 vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self,
 		  int argc, const VALUE *argv, VALUE block_handler)
 {
     return invoke_block_from_c_proc(ec, proc, self, argc, argv, block_handler, TRUE);
 }
 
-VALUE
+MJIT_FUNC_EXPORTED VALUE
 rb_vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc,
 		  int argc, const VALUE *argv, VALUE passed_block_handler)
 {
@@ -1393,7 +1402,7 @@ make_localjump_error(const char *mesg, VALUE value, int reason)
     return exc;
 }
 
-void
+MJIT_FUNC_EXPORTED void
 rb_vm_localjump_error(const char *mesg, VALUE value, int reason)
 {
     VALUE exc = make_localjump_error(mesg, value, reason);
@@ -1763,7 +1772,7 @@ hook_before_rewind(rb_execution_context_t *ec, const rb_control_frame_t *cfp, in
   };
  */
 
-static VALUE
+MJIT_FUNC_EXPORTED VALUE
 vm_exec(rb_execution_context_t *ec)
 {
     enum ruby_tag_type state;
@@ -3386,5 +3395,9 @@ vm_collect_usage_register(int reg, int isset)
 	(*ruby_vm_collect_usage_func_register)(reg, isset);
 }
 #endif
+
+#else /* #ifndef MJIT_HEADER */
+#include "mjit_helper.h"
+#endif /* #ifndef MJIT_HEADER */
 
 #include "vm_call_iseq_optimized.inc" /* required from vm_insnhelper.c */

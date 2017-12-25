@@ -4048,7 +4048,7 @@ stack_check(rb_execution_context_t *ec, int water_mark)
 
 #define STACKFRAME_FOR_CALL_CFUNC 838
 
-int
+MJIT_FUNC_EXPORTED int
 rb_ec_stack_check(rb_execution_context_t *ec)
 {
     return stack_check(ec, STACKFRAME_FOR_CALL_CFUNC);
@@ -6047,7 +6047,7 @@ rb_gc_writebarrier_unprotect(VALUE obj)
 /*
  * remember `obj' if needed.
  */
-void
+MJIT_FUNC_EXPORTED void
 rb_gc_writebarrier_remember(VALUE obj)
 {
     rb_objspace_t *objspace = &rb_objspace;
