@@ -410,14 +410,22 @@ init_list(struct rb_mjit_unit_list *list)
     list->length = 0;
 }
 
-/* Add unit UNIT to the tail of doubly linked LIST.  It should be not in
-   the list before.  */
-static void
-add_to_list(struct rb_mjit_unit *unit, struct rb_mjit_unit_list *list)
+/* Allocate struct rb_mjit_unit_node and return it. This MUST NOT be
+   called inside critical section because that causes deadlock. ZALLOC
+   may fire GC and GC hooks mjit_gc_start_hook that starts critical section. */
+static struct rb_mjit_unit_node *
+create_list_node(struct rb_mjit_unit *unit)
 {
     struct rb_mjit_unit_node *node = ZALLOC(struct rb_mjit_unit_node);
     node->unit = unit;
+    return node;
+}
 
+/* Add unit node to the tail of doubly linked LIST.  It should be not in
+   the list before.  */
+static void
+add_to_list(struct rb_mjit_unit_node *node, struct rb_mjit_unit_list *list)
+{
     /* Append iseq to list */
     if (list->head == NULL) {
 	list->head = node;
@@ -703,8 +711,9 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
 	remove(so_file);
 
     if ((ptrdiff_t)func > (ptrdiff_t)LAST_JIT_ISEQ_FUNC) {
+	struct rb_mjit_unit_node *node = create_list_node(unit);
 	CRITICAL_SECTION_START(3, "end of jit");
-	add_to_list(unit, &active_units);
+	add_to_list(node, &active_units);
 	if (unit->iseq)
 	    verbose(1, "JIT success (%.1fms): %s@%s:%d -> %s", end_time - start_time, RSTRING_PTR(unit->iseq->body->location.label),
 		    RSTRING_PTR(rb_iseq_path(unit->iseq)), FIX2INT(unit->iseq->body->location.first_lineno), c_file);
@@ -786,18 +795,19 @@ create_unit(const rb_iseq_t *iseq)
 void
 mjit_add_iseq_to_process(const rb_iseq_t *iseq)
 {
-    struct rb_mjit_unit *unit;
+    struct rb_mjit_unit_node *node;
 
     if (!mjit_init_p)
 	return;
 
     create_unit(iseq);
-    if ((unit = iseq->body->jit_unit) == NULL)
+    if (iseq->body->jit_unit == NULL)
 	/* Failure in creating the unit.  */
 	return;
 
+    node = create_list_node(iseq->body->jit_unit);
     CRITICAL_SECTION_START(3, "in add_iseq_to_process");
-    add_to_list(unit, &unit_queue);
+    add_to_list(node, &unit_queue);
     /* TODO: Unload some units if it's >= max_cache_size */
     verbose(3, "Sending wakeup signal to workers in mjit_add_iseq_to_process");
     native_cond_broadcast(&mjit_worker_wakeup);
