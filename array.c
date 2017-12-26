@@ -520,7 +520,7 @@ VALUE
     return ary;
 }
 
-VALUE
+MJIT_FUNC_EXPORTED VALUE
 rb_ary_tmp_new_from_values(VALUE klass, long n, const VALUE *elts)
 {
     VALUE ary;
