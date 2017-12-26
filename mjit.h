@@ -66,11 +66,11 @@ RUBY_SYMBOL_EXPORT_END
 
 extern int mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *funcname);
 extern void mjit_init(struct mjit_options *opts);
-extern void mjit_finish();
-extern void mjit_gc_start_hook();
-extern void mjit_gc_finish_hook();
+extern void mjit_finish(void);
+extern void mjit_gc_start_hook(void);
+extern void mjit_gc_finish_hook(void);
 extern void mjit_free_iseq(const rb_iseq_t *iseq);
-extern void mjit_mark();
+extern void mjit_mark(void);
 extern struct mjit_cont *mjit_cont_new(rb_execution_context_t *ec);
 extern void mjit_cont_free(struct mjit_cont *cont);
 

@@ -182,7 +182,7 @@ VALUE rb_mMJIT;
 
 /* Return time in milliseconds as a double.  */
 static double
-real_ms_time()
+real_ms_time(void)
 {
     struct timeval  tv;
 
@@ -364,7 +364,7 @@ CRITICAL_SECTION_FINISH(int level, const char *msg)
 /* Wait until workers don't compile any iseq.  It is called at the
    start of GC.  */
 void
-mjit_gc_start_hook()
+mjit_gc_start_hook(void)
 {
     if (!mjit_init_p)
 	return;
@@ -381,7 +381,7 @@ mjit_gc_start_hook()
 /* Send a signal to workers to continue iseq compilations.  It is
    called at the end of GC.  */
 void
-mjit_gc_finish_hook()
+mjit_gc_finish_hook(void)
 {
     if (!mjit_init_p)
 	return;
@@ -548,7 +548,7 @@ static enum {PCH_NOT_READY, PCH_FAILED, PCH_SUCCESS} pch_status;
 
 /* The function producing the pre-compiled header. */
 static void
-make_pch()
+make_pch(void)
 {
     int exit_code;
     static const char *input[] = {NULL, NULL};
@@ -749,7 +749,7 @@ static int worker_finished;
    thread by rb_thread_create_mjit_thread. It compiles precompiled header
    and then compiles requested ISeqs. */
 static void
-worker()
+worker(void)
 {
     make_pch();
     if (pch_status == PCH_FAILED) {
@@ -993,7 +993,7 @@ mjit_add_iseq_to_process(const rb_iseq_t *iseq)
 #define CLANG_PATH "clang"
 
 static void
-init_header_filename()
+init_header_filename(void)
 {
     FILE *f;
 
@@ -1110,7 +1110,7 @@ mjit_init(struct mjit_options *opts)
    and free MJIT data.  It should be called last during MJIT
    life.  */
 void
-mjit_finish()
+mjit_finish(void)
 {
     if (!mjit_init_p)
 	return;
