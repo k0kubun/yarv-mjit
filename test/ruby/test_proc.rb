@@ -160,26 +160,34 @@ class TestProc < Test::Unit::TestCase
       $SAFE += 1
       proc {$SAFE}
     }.call
-    assert_equal(safe, $SAFE)
-    assert_equal(safe + 1, p.call)
-    assert_equal(safe, $SAFE)
 
+    assert_equal(safe + 1, $SAFE)
+    assert_equal(safe + 1, p.call)
+    assert_equal(safe + 1, $SAFE)
+
+    $SAFE = 0
     c.class_eval {define_method(:safe, p)}
     assert_equal(safe, x.safe)
-    assert_equal(safe, x.method(:safe).call)
-    assert_equal(safe, x.method(:safe).to_proc.call)
 
+    $SAFE = 0
     p = proc {$SAFE += 1}
     assert_equal(safe + 1, p.call)
-    assert_equal(safe, $SAFE)
+    assert_equal(safe + 1, $SAFE)
 
+    $SAFE = 0
     c.class_eval {define_method(:inc, p)}
     assert_equal(safe + 1, proc {x.inc; $SAFE}.call)
-    assert_equal(safe, $SAFE)
+    assert_equal(safe + 1, $SAFE)
+
+    $SAFE = 0
     assert_equal(safe + 1, proc {x.method(:inc).call; $SAFE}.call)
-    assert_equal(safe, $SAFE)
+    assert_equal(safe + 1, $SAFE)
+
+    $SAFE = 0
     assert_equal(safe + 1, proc {x.method(:inc).to_proc.call; $SAFE}.call)
-    assert_equal(safe, $SAFE)
+    assert_equal(safe + 1, $SAFE)
+  ensure
+    $SAFE = 0
   end
 
   def m2
@@ -395,6 +403,15 @@ class TestProc < Test::Unit::TestCase
     b = nil
     1.times { x, y, z = 1, 2, 3; [x,y,z]; b = binding }
     assert_equal([1, 2, 3], b.eval("[x, y, z]"))
+  end
+
+  def test_binding_source_location
+    b, expected_location = binding, [__FILE__, __LINE__]
+    assert_equal(expected_location, b.source_location)
+
+    file, lineno = method(:source_location_test).to_proc.binding.source_location
+    assert_match(/^#{ Regexp.quote(__FILE__) }$/, file)
+    assert_equal(@@line_of_source_location_test, lineno, 'Bug #2427')
   end
 
   def test_proc_lambda

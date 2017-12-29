@@ -12,6 +12,7 @@
 #include "eval_intern.h"
 #include "internal.h"
 #include "gc.h"
+#include "vm_core.h"
 #include "iseq.h"
 
 /* Proc.new with no block will raise an exception in the future
@@ -123,28 +124,11 @@ rb_obj_is_proc(VALUE proc)
     }
 }
 
-VALUE rb_proc_create(VALUE klass, const struct rb_block *block,
-		     int8_t safe_level, int8_t is_from_method, int8_t is_lambda);
-
-/* :nodoc: */
-static VALUE
-proc_dup(VALUE self)
-{
-    VALUE procval;
-    rb_proc_t *src;
-
-    GetProcPtr(self, src);
-    procval = rb_proc_create(rb_cProc, &src->block,
-			     src->safe_level, src->is_from_method, src->is_lambda);
-    RB_GC_GUARD(self); /* for: body = proc_dup(body) */
-    return procval;
-}
-
 /* :nodoc: */
 static VALUE
 proc_clone(VALUE self)
 {
-    VALUE procval = proc_dup(self);
+    VALUE procval = rb_proc_dup(self);
     CLONESETUP(procval, self);
     return procval;
 }
@@ -611,6 +595,24 @@ bind_receiver(VALUE bindval)
     return vm_block_self(&bind->block);
 }
 
+/*
+ *  call-seq:
+ *     binding.source_location  -> [String, Integer]
+ *
+ *  Returns the Ruby source filename and line number of the binding object.
+ */
+static VALUE
+bind_location(VALUE bindval)
+{
+    VALUE loc[2];
+    const rb_binding_t *bind;
+    GetBindingPtr(bindval, bind);
+    loc[0] = pathobj_path(bind->pathobj);
+    loc[1] = INT2FIX(bind->first_lineno);
+
+    return rb_ary_new4(2, loc);
+}
+
 static VALUE
 cfunc_proc_new(VALUE klass, VALUE ifunc, int8_t is_lambda)
 {
@@ -733,7 +735,7 @@ proc_new(VALUE klass, int8_t is_lambda)
 	    return procval;
 	}
 	else {
-	    VALUE newprocval = proc_dup(procval);
+	    VALUE newprocval = rb_proc_dup(procval);
 	    RBASIC_SET_CLASS(newprocval, klass);
 	    return newprocval;
 	}
@@ -1963,7 +1965,7 @@ rb_mod_define_method(int argc, VALUE *argv, VALUE mod)
 	RB_GC_GUARD(body);
     }
     else {
-	VALUE procval = proc_dup(body);
+	VALUE procval = rb_proc_dup(body);
 	if (vm_proc_iseq(procval) != NULL) {
 	    rb_proc_t *proc;
 	    GetProcPtr(procval, proc);
@@ -2825,12 +2827,15 @@ proc_binding(VALUE self)
 	    const struct vm_ifunc *ifunc = block->as.captured.code.ifunc;
 	    if (IS_METHOD_PROC_IFUNC(ifunc)) {
 		VALUE method = (VALUE)ifunc->data;
+		VALUE name = rb_fstring_cstr("<empty_iseq>");
+		rb_iseq_t *empty;
 		binding_self = method_receiver(method);
 		iseq = rb_method_iseq(method);
 		env = VM_ENV_ENVVAL_PTR(block->as.captured.ep);
 		env = env_clone(env, method_cref(method));
 		/* set empty iseq */
-		RB_OBJ_WRITE(env, &env->iseq, rb_iseq_new(NULL, rb_str_new2("<empty iseq>"), rb_str_new2("<empty_iseq>"), Qnil, 0, ISEQ_TYPE_TOP));
+		empty = rb_iseq_new(NULL, name, name, Qnil, 0, ISEQ_TYPE_TOP);
+		RB_OBJ_WRITE(env, &env->iseq, empty);
 		break;
 	    }
 	    else {
@@ -3093,7 +3098,7 @@ Init_Proc(void)
     rb_define_method(rb_cProc, "to_proc", proc_to_proc, 0);
     rb_define_method(rb_cProc, "arity", proc_arity, 0);
     rb_define_method(rb_cProc, "clone", proc_clone, 0);
-    rb_define_method(rb_cProc, "dup", proc_dup, 0);
+    rb_define_method(rb_cProc, "dup", rb_proc_dup, 0);
     rb_define_method(rb_cProc, "hash", proc_hash, 0);
     rb_define_method(rb_cProc, "to_s", proc_to_s, 0);
     rb_define_alias(rb_cProc, "inspect", "to_s");
@@ -3223,5 +3228,6 @@ Init_Binding(void)
     rb_define_method(rb_cBinding, "local_variable_set", bind_local_variable_set, 2);
     rb_define_method(rb_cBinding, "local_variable_defined?", bind_local_variable_defined_p, 1);
     rb_define_method(rb_cBinding, "receiver", bind_receiver, 0);
+    rb_define_method(rb_cBinding, "source_location", bind_location, 0);
     rb_define_global_function("binding", rb_f_binding, 0);
 }

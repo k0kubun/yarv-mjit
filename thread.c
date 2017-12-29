@@ -2952,18 +2952,16 @@ rb_thread_stop_p(VALUE thread)
  *  call-seq:
  *     thr.safe_level   -> integer
  *
- *  Returns the safe level in effect for <i>thr</i>. Setting thread-local safe
- *  levels can help when implementing sandboxes which run insecure code.
+ *  Returns the safe level.
  *
- *     thr = Thread.new { $SAFE = 1; sleep }
- *     Thread.current.safe_level   #=> 0
- *     thr.safe_level              #=> 1
+ *  This method is obsolete because $SAFE is a process global state.
+ *  Simply check $SAFE.
  */
 
 static VALUE
 rb_thread_safe_level(VALUE thread)
 {
-    return INT2NUM(rb_thread_ptr(thread)->ec->safe_level);
+    return UINT2NUM(rb_safe_level());
 }
 
 /*
@@ -3168,7 +3166,7 @@ rb_thread_fetch(int argc, VALUE *argv, VALUE self)
 	return rb_yield(key);
     }
     else if (argc == 1) {
-	rb_raise(rb_eKeyError, "key not found: %"PRIsVALUE, key);
+	rb_key_err_raise(rb_sprintf("key not found: %+"PRIsVALUE, key), self, key);
     }
     else {
 	return argv[1];
