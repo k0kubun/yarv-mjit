@@ -129,7 +129,8 @@ struct rb_mjit_unit {
     char used_code_p;
 };
 
-/* Node of linked list in struct rb_mjit_unit_list. */
+/* Node of linked list in struct rb_mjit_unit_list.
+   TODO: use ccan/list for this */
 struct rb_mjit_unit_node {
     struct rb_mjit_unit *unit;
     struct rb_mjit_unit_node *next, *prev;
@@ -278,7 +279,8 @@ form_args(int num, ...)
 }
 
 /* Start an OS process of executable PATH with arguments ARGV.  Return
-   PID of the process.  */
+   PID of the process.
+   TODO: Use the same function in process.c */
 static pid_t
 start_process(const char *path, char *const *argv)
 {
@@ -318,7 +320,8 @@ start_process(const char *path, char *const *argv)
 }
 
 /* Execute an OS process of executable PATH with arguments ARGV.
-   Return -1 if failed to execute, otherwise exit code of the process.  */
+   Return -1 if failed to execute, otherwise exit code of the process.
+   TODO: Use the same function in process.c */
 static int
 exec_process(const char *path, char *const argv[])
 {
