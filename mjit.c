@@ -316,7 +316,7 @@ start_process(const char *path, char *const *argv)
 	    /* Even if we successfully found CC to compile PCH we still can
 	     fail with loading the CC in very rare cases for some reasons.
 	     Stop the forked process in this case.  */
-	    fprintf(stderr, "MJIT: Error in execvp: %s\n", path);
+	    verbose(1, "MJIT: Error in execvp: %s\n", path);
 	    _exit(1);
 	}
     }
