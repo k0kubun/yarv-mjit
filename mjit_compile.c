@@ -71,7 +71,9 @@ extern int simple_iseq_p(const rb_iseq_t *iseq);
 static int
 inlinable_cfunc_p(CALL_CACHE cc)
 {
-    return GET_GLOBAL_METHOD_STATE() == cc->method_state && cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
+    return GET_GLOBAL_METHOD_STATE() == cc->method_state
+	&& cc->me && cc->me->defined_class /* when defined_class is 0, def is Qnil */
+	&& cc->me->def->type == VM_METHOD_TYPE_CFUNC;
 }
 
 /* Returns iseq from cc if it's available and still not obsoleted. */
