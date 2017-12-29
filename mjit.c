@@ -312,7 +312,7 @@ start_process(const char *path, char *const *argv)
 	/* Even if we successfully found CC to compile PCH we still can
 	 fail with loading the CC in very rare cases for some reasons.
 	 Stop the forked process in this case.  */
-	fprintf(stderr, "MJIT: Error in execvp: %s", path);
+	fprintf(stderr, "MJIT: Error in execvp: %s\n", path);
 	_exit(1);
     }
 #endif
@@ -584,7 +584,7 @@ make_pch(void)
 	pch_status = PCH_SUCCESS;
     } else {
 	if (mjit_opts.warnings || mjit_opts.verbose)
-	    fprintf(stderr, "MJIT warning: making precompiled header failed on compilation\n");
+	    fprintf(stderr, "MJIT warning: Making precompiled header failed on compilation. Stopping MJIT worker...\n");
 	pch_status = PCH_FAILED;
     }
     /* wakeup `mjit_finish` */
@@ -762,7 +762,7 @@ worker(void)
 	verbose(3, "Sending wakeup signal to client in a mjit-worker");
 	rb_native_cond_signal(&mjit_client_wakeup);
 	CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
-	return;
+	return; /* TODO: do the same thing in the latter half of mjit_finish */
     }
 
     /* main worker loop */
