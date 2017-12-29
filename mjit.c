@@ -298,22 +298,27 @@ start_process(const char *path, char *const *argv)
 #ifdef _WIN32
     pid = spawnvp(_P_NOWAIT, path, argv);
 #else
-    if ((pid = vfork()) == 0) {
-	if (mjit_opts.verbose == 0) {
-	    /* CC can be started in a thread using a file which has been
-	       already removed while MJIT is finishing.  Discard the
-	       messages about missing files.  */
-	    FILE *f = fopen("/dev/null", "w");
+    {
+	/* Not calling IO functions between fork and exec for safety */
+	FILE *f = fopen("/dev/null", "w");
+	int dev_null = fileno(f);
+	fclose(f);
 
-	    dup2(fileno(f), STDERR_FILENO);
-	    dup2(fileno(f), STDOUT_FILENO);
+	if ((pid = vfork()) == 0) {
+	    if (mjit_opts.verbose == 0) {
+		/* CC can be started in a thread using a file which has been
+		   already removed while MJIT is finishing.  Discard the
+		   messages about missing files.  */
+		dup2(dev_null, STDERR_FILENO);
+		dup2(dev_null, STDOUT_FILENO);
+	    }
+	    pid = execvp(path, argv); /* Pid will be negative on an error */
+	    /* Even if we successfully found CC to compile PCH we still can
+	     fail with loading the CC in very rare cases for some reasons.
+	     Stop the forked process in this case.  */
+	    fprintf(stderr, "MJIT: Error in execvp: %s\n", path);
+	    _exit(1);
 	}
-	pid = execvp(path, argv); /* Pid will be negative on an error */
-	/* Even if we successfully found CC to compile PCH we still can
-	 fail with loading the CC in very rare cases for some reasons.
-	 Stop the forked process in this case.  */
-	fprintf(stderr, "MJIT: Error in execvp: %s\n", path);
-	_exit(1);
     }
 #endif
     return pid;
