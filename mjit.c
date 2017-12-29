@@ -320,7 +320,7 @@ start_process(const char *path, char *const *argv)
 }
 
 /* Execute an OS process of executable PATH with arguments ARGV.
-   Return -1 if failed to execute, otherwise exit code of the process.
+   Return -1 or -2 if failed to execute, otherwise exit code of the process.
    TODO: Use the same function in process.c */
 static int
 exec_process(const char *path, char *const argv[])
@@ -330,7 +330,7 @@ exec_process(const char *path, char *const argv[])
 
     pid = start_process(path, argv);
     if (pid <= 0)
-	return -1;
+	return -2;
 
     for (;;) {
 	waitpid(pid, &stat, 0);
@@ -628,7 +628,8 @@ compile_c_to_so(const char *c_file, const char *so_file)
     exit_code = exec_process(cc_path, args);
     xfree(args);
 
-    verbose(3, "compile exit_status: %d", exit_code);
+    if (exit_code != 0)
+	verbose(2, "compile_c_to_so: compile error: %d", exit_code);
     return exit_code == 0;
 }
 
@@ -723,7 +724,7 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     if (!mjit_opts.save_temps)
 	remove(c_file);
     if (!success) {
-	verbose(2, "Failed to load so: %s", so_file);
+	verbose(2, "Failed to generate so: %s", so_file);
 	return (void *)NOT_COMPILABLE_JIT_ISEQ_FUNC;
     }
 
