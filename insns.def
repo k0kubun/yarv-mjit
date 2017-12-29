@@ -952,7 +952,7 @@ invokeblock
     calling.recv = GET_SELF();
 
     val = vm_invoke_block(ec, GET_CFP(), &calling, ci);
-    if (val == Qundef) {
+    if (val == Qundef && (val = mjit_exec(ec)) == Qundef) {
 	RESTORE_REGS();
 	NEXT_INSN();
     }
