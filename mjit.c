@@ -23,7 +23,7 @@
      code execution.  MJIT has one thread (*worker*) to do
      parallel compilations:
       o It prepares a precompiled code of the minimized header.
-	It starts at the MRI execution start
+        It starts at the MRI execution start
       o It generates PIC object files of ISEQs
       o It takes one JIT unit from a priority queue unless it is empty.
       o It translates the JIT unit ISEQ into C-code using the precompiled
@@ -45,7 +45,7 @@
                     |                         MRI building
       --------------|----------------------------------------
                     |                         MRI execution
-     	            |
+                    |
        _____________|_____
       |             |     |
       |          ___V__   |  CC      ____________________
