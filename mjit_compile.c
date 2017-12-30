@@ -593,7 +593,8 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	break;
       case BIN(throw):
 	fprintf(f, "  RUBY_VM_CHECK_INTS(ec);\n");
-	fprintf(f, "  THROW_EXCEPTION(vm_throw(ec, cfp, 0x%"PRIxVALUE", stack[%d]));\n", operands[0], --b->stack_size);
+	fprintf(f, "  ec->errinfo = vm_throw(ec, cfp, 0x%"PRIxVALUE", stack[%d]);\n", operands[0], --b->stack_size);
+	fprintf(f, "  EC_JUMP_TAG(ec, ec->tag->state);\n");
 	b->finish_p = TRUE;
 	break;
       case BIN(jump):
