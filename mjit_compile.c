@@ -466,6 +466,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 		b->stack_size-1, operands[0], operands[1], operands[2], b->stack_size-1);
 	break;
       case BIN(checkmatch):
+	fprintf(f, "  cfp->sp = cfp->bp + %d;\n", b->stack_size + 1);
 	fprintf(f, "  stack[%d] = vm_check_match(ec, stack[%d], stack[%d], 0x%"PRIxVALUE");\n", b->stack_size-2, b->stack_size-2, b->stack_size-1, operands[0]);
 	b->stack_size--;
 	break;
