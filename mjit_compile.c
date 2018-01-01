@@ -549,7 +549,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", b->stack_size + 1);
 	    fprintf(f, "    {\n");
 	    fprintf(f, "      VALUE v = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE");\n", operands[0]);
-	    fprintf(f, "      if (v == Qundef) {\n");
+	    fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n");
 	    fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n");
 	    fprintf(f, "        stack[%d] = vm_exec(ec);\n", b->stack_size - ci->orig_argc);
 	    fprintf(f, "      } else {\n");
