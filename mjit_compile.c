@@ -547,10 +547,14 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    calling.recv = cfp->self;\n");
 
 	    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", b->stack_size + 1);
-	    fprintf(f, "    stack[%d] = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE");\n", b->stack_size - ci->orig_argc, operands[0]);
-	    fprintf(f, "    if (stack[%d] == Qundef) {\n", b->stack_size - ci->orig_argc);
-	    fprintf(f, "      VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n");
-	    fprintf(f, "      stack[%d] = vm_exec(ec);\n", b->stack_size - ci->orig_argc);
+	    fprintf(f, "    {\n");
+	    fprintf(f, "      VALUE v = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE");\n", operands[0]);
+	    fprintf(f, "      if (v == Qundef) {\n");
+	    fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n");
+	    fprintf(f, "        stack[%d] = vm_exec(ec);\n", b->stack_size - ci->orig_argc);
+	    fprintf(f, "      } else {\n");
+	    fprintf(f, "        stack[%d] = v;\n", b->stack_size - ci->orig_argc);
+	    fprintf(f, "      }\n");
 	    fprintf(f, "    }\n");
 	    fprintf(f, "  }\n");
 	    b->stack_size += 1 - ci->orig_argc;
@@ -622,7 +626,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	next_pos = pos + insn_len(insn) + (unsigned int)operands[1];
 	break;
       case BIN(getinlinecache):
-	fprintf(f, "  stack[%d] = vm_ic_hit_p(0x%"PRIxVALUE", cfp->ep);", b->stack_size, operands[1]);
+	fprintf(f, "  stack[%d] = vm_ic_hit_p(0x%"PRIxVALUE", cfp->ep);\n", b->stack_size, operands[1]);
 	fprintf(f, "  if (stack[%d] != Qnil) {\n", b->stack_size);
 	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
 	fprintf(f, "  }\n");
