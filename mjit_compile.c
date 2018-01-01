@@ -52,20 +52,6 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
     }
 }
 
-/* push back stack in local variable to YARV's stack pointer */
-static void
-fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
-{
-    if (argc) {
-	unsigned int i;
-	/* TODO: use memmove or memcopy, if not optimized by compiler */
-	for (i = 0; i < argc; i++) {
-	    fprintf(f, "    *(cfp->sp) = stack[%d];\n", base_pos + i);
-	    fprintf(f, "    cfp->sp++;\n");
-	}
-    }
-}
-
 extern int simple_iseq_p(const rb_iseq_t *iseq);
 
 static int
@@ -167,7 +153,7 @@ compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, 
 
     fprintf(f, "  {\n");
     fprintf(f, "    struct rb_calling_info calling;\n");
-    fprint_args(f, argc + 1, stack_size - argc - 1); /* +1 is for recv */
+    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
     if (with_block) {
 	fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
     }
@@ -533,7 +519,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "  {\n");
 	    fprintf(f, "    struct rb_calling_info calling;\n");
 	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
-	    fprint_args(f, push_count + 1, b->stack_size - push_count - 1);
+	    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", b->stack_size + 1);
 	    fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", TRUE);\n", operands[0], operands[2]);
 	    fprintf(f, "    calling.recv = cfp->self;\n");
 	    fprintf(f, "    vm_search_super_method(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", operands[0], operands[1]);
@@ -559,7 +545,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
 	    fprintf(f, "    calling.recv = cfp->self;\n");
 
-	    fprint_args(f, ci->orig_argc, b->stack_size - ci->orig_argc);
+	    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", b->stack_size + 1);
 	    fprintf(f, "    stack[%d] = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE");\n", b->stack_size - ci->orig_argc, operands[0]);
 	    fprintf(f, "    if (stack[%d] == Qundef) {\n", b->stack_size - ci->orig_argc);
 	    fprintf(f, "      VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n");
@@ -812,11 +798,7 @@ compile_insns(FILE *f, const struct rb_iseq_constant_body *body, unsigned int st
 static void
 compile_cancel_handler(FILE *f, const struct rb_iseq_constant_body *body)
 {
-    unsigned int i;
     fprintf(f, "cancel:\n");
-    for (i = 0; i < body->stack_max; i++) {
-	fprintf(f, "  *((VALUE *)cfp->bp + %d) = stack[%d];\n", i + 1, i);
-    }
     fprintf(f, "  return Qundef;\n");
 }
 
@@ -830,7 +812,7 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
 
     fprintf(f, "VALUE %s(rb_execution_context_t *ec, rb_control_frame_t *cfp) {\n", funcname);
     if (body->stack_max > 0) {
-	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
+	fprintf(f, "  VALUE *stack = cfp->sp;\n");
     }
 
     /* Simulate `opt_pc` in setup_parameters_complex */
