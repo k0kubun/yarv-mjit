@@ -79,8 +79,10 @@ extern "C" {
 # define __has_extension __has_feature
 #endif
 
-#if GCC_VERSION_SINCE(4, 6, 0) || __has_extension(c_static_assert)
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
 # define STATIC_ASSERT(name, expr) _Static_assert(expr, #name ": " #expr)
+#elif GCC_VERSION_SINCE(4, 6, 0) || __has_extension(c_static_assert)
+# define STATIC_ASSERT(name, expr) RB_GNUC_EXTENSION _Static_assert(expr, #name ": " #expr)
 #else
 # define STATIC_ASSERT(name, expr) typedef int static_assert_##name##_check[1 - 2*!(expr)]
 #endif
@@ -107,7 +109,7 @@ extern "C" {
     __builtin_mul_overflow_p((a), (b), (__typeof__(a * b))0)
 #elif defined HAVE_BUILTIN___BUILTIN_MUL_OVERFLOW
 #define MUL_OVERFLOW_P(a, b) \
-    ({__typeof__(a) c; __builtin_mul_overflow((a), (b), &c);})
+    RB_GNUC_EXTENSION_BLOCK(__typeof__(a) c; __builtin_mul_overflow((a), (b), &c))
 #endif
 
 #define MUL_OVERFLOW_SIGNED_INTEGER_P(a, b, min, max) ( \
@@ -120,10 +122,10 @@ extern "C" {
 #ifdef HAVE_BUILTIN___BUILTIN_MUL_OVERFLOW_P
 /* __builtin_mul_overflow_p can take bitfield */
 /* and GCC permits bitfields for integers other than int */
-#define MUL_OVERFLOW_FIXNUM_P(a, b) ({ \
+#define MUL_OVERFLOW_FIXNUM_P(a, b) RB_GNUC_EXTENSION_BLOCK( \
     struct { long fixnum : SIZEOF_LONG * CHAR_BIT - 1; } c; \
     __builtin_mul_overflow_p((a), (b), c.fixnum); \
-})
+)
 #else
 #define MUL_OVERFLOW_FIXNUM_P(a, b) MUL_OVERFLOW_SIGNED_INTEGER_P(a, b, FIXNUM_MIN, FIXNUM_MAX)
 #endif
@@ -293,10 +295,15 @@ nlz_int128(uint128_t x)
 static inline unsigned int
 nlz_intptr(uintptr_t x)
 {
-#if SIZEOF_VOIDP == 8
-    return nlz_long_long(x);
-#elif SIZEOF_VOIDP == 4
+#if SIZEOF_UINTPTR_T == SIZEOF_INT
     return nlz_int(x);
+#elif SIZEOF_UINTPTR_T == SIZEOF_LONG
+    return nlz_long(x);
+#elif SIZEOF_UINTPTR_T == SIZEOF_LONG_LONG
+    return nlz_long_long(x);
+#else
+    #error no known integer type corresponds uintptr_t
+    return /* sane compiler */ ~0;
 #endif
 }
 
@@ -507,12 +514,18 @@ rb_fix_mod_fix(VALUE x, VALUE y)
     return mod;
 }
 
-#if defined(HAVE_UINT128_T)
+#if defined(HAVE_UINT128_T) && defined(HAVE_LONG_LONG)
 #   define bit_length(x) \
     (unsigned int) \
     (sizeof(x) <= SIZEOF_INT ? SIZEOF_INT * CHAR_BIT - nlz_int((unsigned int)(x)) : \
      sizeof(x) <= SIZEOF_LONG ? SIZEOF_LONG * CHAR_BIT - nlz_long((unsigned long)(x)) : \
      sizeof(x) <= SIZEOF_LONG_LONG ? SIZEOF_LONG_LONG * CHAR_BIT - nlz_long_long((unsigned LONG_LONG)(x)) : \
+     SIZEOF_INT128_T * CHAR_BIT - nlz_int128((uint128_t)(x)))
+#elif defined(HAVE_UINT128_T)
+#   define bit_length(x) \
+    (unsigned int) \
+    (sizeof(x) <= SIZEOF_INT ? SIZEOF_INT * CHAR_BIT - nlz_int((unsigned int)(x)) : \
+     sizeof(x) <= SIZEOF_LONG ? SIZEOF_LONG * CHAR_BIT - nlz_long((unsigned long)(x)) : \
      SIZEOF_INT128_T * CHAR_BIT - nlz_int128((uint128_t)(x)))
 #elif defined(HAVE_LONG_LONG)
 #   define bit_length(x) \
@@ -914,8 +927,8 @@ struct vm_throw_data {
 
 struct vm_ifunc_argc {
 #if SIZEOF_INT * 2 > SIZEOF_VALUE
-    int min: (SIZEOF_VALUE * CHAR_BIT) / 2;
-    int max: (SIZEOF_VALUE * CHAR_BIT) / 2;
+    signed int min: (SIZEOF_VALUE * CHAR_BIT) / 2;
+    signed int max: (SIZEOF_VALUE * CHAR_BIT) / 2;
 #else
     int min, max;
 #endif
@@ -1048,7 +1061,7 @@ VALUE rb_ary_aref1(VALUE ary, VALUE i);
 VALUE rb_ary_aref2(VALUE ary, VALUE b, VALUE e);
 size_t rb_ary_memsize(VALUE);
 VALUE rb_to_array_type(VALUE obj);
-#ifdef __GNUC__
+#if defined(__GNUC__) && defined(HAVE_VA_ARGS_MACRO)
 #define rb_ary_new_from_args(n, ...) \
     __extension__ ({ \
 	const VALUE args_to_new_ary[] = {__VA_ARGS__}; \
@@ -1285,6 +1298,7 @@ st_table *rb_init_identtable(void);
 st_table *rb_init_identtable_with_size(st_index_t size);
 VALUE rb_hash_compare_by_id_p(VALUE hash);
 VALUE rb_to_hash_type(VALUE obj);
+VALUE rb_hash_key_str(VALUE);
 
 #define RHASH_TBL_RAW(h) rb_hash_tbl_raw(h)
 VALUE rb_hash_keys(VALUE hash);

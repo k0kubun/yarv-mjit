@@ -76,7 +76,8 @@ rb_iseq_free(const rb_iseq_t *iseq)
 	mjit_free_iseq(iseq); /* Notify MJIT */
 	if (iseq->body) {
 	    ruby_xfree((void *)iseq->body->iseq_encoded);
-	    ruby_xfree((void *)iseq->body->insns_info);
+	    ruby_xfree((void *)iseq->body->insns_info.body);
+	    ruby_xfree((void *)iseq->body->insns_info.positions);
 	    ruby_xfree((void *)iseq->body->local_table);
 	    ruby_xfree((void *)iseq->body->is_entries);
 
@@ -159,7 +160,7 @@ iseq_memsize(const rb_iseq_t *iseq)
 
 	size += sizeof(struct rb_iseq_constant_body);
 	size += body->iseq_size * sizeof(VALUE);
-	size += body->insns_info_size * sizeof(struct iseq_insn_info_entry);
+	size += body->insns_info.size * (sizeof(struct iseq_insn_info_entry) + sizeof(unsigned int));
 	size += body->local_table_size * sizeof(ID);
 	if (body->catch_table) {
 	    size += iseq_catch_table_bytes(body->catch_table->size);
@@ -347,7 +348,7 @@ prepare_iseq_build(rb_iseq_t *iseq,
     return Qtrue;
 }
 
-#if VM_CHECK_MODE > 0
+#if VM_CHECK_MODE > 0 && VM_INSN_INFO_TABLE_IMPL > 0
 static void validate_get_insn_info(rb_iseq_t *iseq);
 #endif
 
@@ -359,7 +360,7 @@ finish_iseq_build(rb_iseq_t *iseq)
     ISEQ_COMPILE_DATA_CLEAR(iseq);
     compile_data_free(data);
 
-#if VM_CHECK_MODE > 0
+#if VM_CHECK_MODE > 0 && VM_INSN_INFO_TABLE_IMPL > 0
     validate_get_insn_info(iseq);
 #endif
 
@@ -1253,17 +1254,19 @@ iseqw_to_a(VALUE self)
     return iseq_data_to_ary(iseq);
 }
 
+#if VM_INSN_INFO_TABLE_IMPL == 1 /* binary search */
 static const struct iseq_insn_info_entry *
 get_insn_info_binary_search(const rb_iseq_t *iseq, size_t pos)
 {
-    size_t size = iseq->body->insns_info_size;
-    const struct iseq_insn_info_entry *insns_info = iseq->body->insns_info;
+    size_t size = iseq->body->insns_info.size;
+    const struct iseq_insn_info_entry *insns_info = iseq->body->insns_info.body;
+    const unsigned int *positions = iseq->body->insns_info.positions;
     const int debug = 0;
 
     if (debug) {
 	printf("size: %"PRIuSIZE"\n", size);
 	printf("insns_info[%"PRIuSIZE"]: position: %d, line: %d, pos: %"PRIuSIZE"\n",
-	       (size_t)0, insns_info[0].position, insns_info[0].line_no, pos);
+	       (size_t)0, positions[0], insns_info[0].line_no, pos);
     }
 
     if (size == 0) {
@@ -1276,10 +1279,10 @@ get_insn_info_binary_search(const rb_iseq_t *iseq, size_t pos)
 	size_t l = 1, r = size - 1;
 	while (l <= r) {
 	    size_t m = l + (r - l) / 2;
-	    if (insns_info[m].position == pos) {
+	    if (positions[m] == pos) {
 		return &insns_info[m];
 	    }
-	    if (insns_info[m].position < pos) {
+	    if (positions[m] < pos) {
 		l = m + 1;
 	    }
 	    else {
@@ -1289,25 +1292,33 @@ get_insn_info_binary_search(const rb_iseq_t *iseq, size_t pos)
 	if (l >= size) {
 	    return &insns_info[size-1];
 	}
-	if (insns_info[l].position > pos) {
+	if (positions[l] > pos) {
 	    return &insns_info[l-1];
 	}
 	return &insns_info[l];
     }
 }
 
-#if VM_CHECK_MODE > 0
+static const struct iseq_insn_info_entry *
+get_insn_info(const rb_iseq_t *iseq, size_t pos)
+{
+    return get_insn_info_binary_search(iseq, pos);
+}
+#endif
+
+#if VM_CHECK_MODE > 0 || VM_INSN_INFO_TABLE_IMPL == 0
 static const struct iseq_insn_info_entry *
 get_insn_info_linear_search(const rb_iseq_t *iseq, size_t pos)
 {
-    size_t i = 0, size = iseq->body->insns_info_size;
-    const struct iseq_insn_info_entry *insns_info = iseq->body->insns_info;
+    size_t i = 0, size = iseq->body->insns_info.size;
+    const struct iseq_insn_info_entry *insns_info = iseq->body->insns_info.body;
+    const unsigned int *positions = iseq->body->insns_info.positions;
     const int debug = 0;
 
     if (debug) {
 	printf("size: %"PRIuSIZE"\n", size);
 	printf("insns_info[%"PRIuSIZE"]: position: %d, line: %d, pos: %"PRIuSIZE"\n",
-	       i, insns_info[i].position, insns_info[i].line_no, pos);
+	       i, positions[i], insns_info[i].line_no, pos);
     }
 
     if (size == 0) {
@@ -1319,26 +1330,36 @@ get_insn_info_linear_search(const rb_iseq_t *iseq, size_t pos)
     else {
 	for (i=1; i<size; i++) {
 	    if (debug) printf("insns_info[%"PRIuSIZE"]: position: %d, line: %d, pos: %"PRIuSIZE"\n",
-			      i, insns_info[i].position, insns_info[i].line_no, pos);
+			      i, positions[i], insns_info[i].line_no, pos);
 
-	    if (insns_info[i].position == pos) {
+	    if (positions[i] == pos) {
 		return &insns_info[i];
 	    }
-	    if (insns_info[i].position > pos) {
+	    if (positions[i] > pos) {
 		return &insns_info[i-1];
 	    }
 	}
     }
     return &insns_info[i-1];
 }
+#endif
 
+#if VM_INSN_INFO_TABLE_IMPL == 0 /* linear search */
+static const struct iseq_insn_info_entry *
+get_insn_info(const rb_iseq_t *iseq, size_t pos)
+{
+    return get_insn_info_linear_search(iseq, pos);
+}
+#endif
+
+#if VM_CHECK_MODE > 0 && VM_INSN_INFO_TABLE_IMPL > 0
 static void
 validate_get_insn_info(rb_iseq_t *iseq)
 {
     size_t i;
     for (i = 0; i < iseq->body->iseq_size; i++) {
-	if (get_insn_info_linear_search(iseq, i) != get_insn_info_binary_search(iseq, i)) {
-	    rb_bug("validate_get_insn_info: get_insn_info_linear_search(iseq, %"PRIuSIZE") != get_insn_info_binary_search(iseq, %"PRIuSIZE")", i, i);
+	if (get_insn_info_linear_search(iseq, i) != get_insn_info(iseq, i)) {
+	    rb_bug("validate_get_insn_info: get_insn_info_linear_search(iseq, %"PRIuSIZE") != get_insn_info(iseq, %"PRIuSIZE")", i, i);
 	}
     }
 }
@@ -1347,7 +1368,7 @@ validate_get_insn_info(rb_iseq_t *iseq)
 unsigned int
 rb_iseq_line_no(const rb_iseq_t *iseq, size_t pos)
 {
-    const struct iseq_insn_info_entry *entry = get_insn_info_binary_search(iseq, pos);
+    const struct iseq_insn_info_entry *entry = get_insn_info(iseq, pos);
 
     if (entry) {
 	return entry->line_no;
@@ -1360,7 +1381,7 @@ rb_iseq_line_no(const rb_iseq_t *iseq, size_t pos)
 MJIT_FUNC_EXPORTED rb_event_flag_t
 rb_iseq_event_flags(const rb_iseq_t *iseq, size_t pos)
 {
-    const struct iseq_insn_info_entry *entry = get_insn_info_binary_search(iseq, pos);
+    const struct iseq_insn_info_entry *entry = get_insn_info(iseq, pos);
     if (entry) {
 	return entry->events;
     }
@@ -1904,8 +1925,8 @@ iseqw_trace_points(VALUE self)
     unsigned int i;
     VALUE ary = rb_ary_new();
 
-    for (i=0; i<iseq->body->insns_info_size; i++) {
-	const struct iseq_insn_info_entry *entry = &iseq->body->insns_info[i];
+    for (i=0; i<iseq->body->insns_info.size; i++) {
+	const struct iseq_insn_info_entry *entry = &iseq->body->insns_info.body[i];
 	if (entry->events) {
 	    push_event_info(iseq, entry->events, entry->line_no, ary);
 	}
@@ -2346,9 +2367,9 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
 	    rb_ary_push(body, (VALUE)label);
 	}
 
-	if (ti < iseq->body->insns_info_size) {
-	    const struct iseq_insn_info_entry *info = &iseq->body->insns_info[ti];
-	    if (info->position == pos) {
+	if (ti < iseq->body->insns_info.size) {
+	    const struct iseq_insn_info_entry *info = &iseq->body->insns_info.body[ti];
+	    if (iseq->body->insns_info.positions[ti] == pos) {
 		int line = info->line_no;
 		rb_event_flag_t events = info->events;
 

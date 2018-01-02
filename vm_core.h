@@ -56,6 +56,13 @@
 
 #define RUBY_VM_THREAD_MODEL 2
 
+/*
+ * implementation selector of get_insn_info algorithm
+ *   0: linear search
+ *   1: binary search
+ */
+#define VM_INSN_INFO_TABLE_IMPL 1
+
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 
@@ -374,7 +381,11 @@ struct rb_iseq_constant_body {
     rb_iseq_location_t location;
 
     /* insn info, must be freed */
-    const struct iseq_insn_info_entry *insns_info;
+    struct iseq_insn_info {
+	const struct iseq_insn_info_entry *body;
+	const unsigned int *positions;
+	unsigned int size;
+    } insns_info;
 
     const ID *local_table;		/* must free */
 
@@ -399,7 +410,6 @@ struct rb_iseq_constant_body {
     unsigned int is_size;
     unsigned int ci_size;
     unsigned int ci_kw_size;
-    unsigned int insns_info_size;
     unsigned int stack_max; /* for stack overflow check */
 
     /* The following fields are MJIT related info.  */
@@ -1017,7 +1027,7 @@ enum {
      * X   : tag for GC marking (It seems as Fixnum)
      * EEE : 3 bits Env flags
      * FF..: 6 bits Frame flags
-     * MM..: 16 bits frame magic (to check frame corruption)
+     * MM..: 15 bits frame magic (to check frame corruption)
      */
 
     /* frame types */
@@ -1028,10 +1038,10 @@ enum {
     VM_FRAME_MAGIC_CFUNC  = 0x55550001,
     VM_FRAME_MAGIC_IFUNC  = 0x66660001,
     VM_FRAME_MAGIC_EVAL   = 0x77770001,
-    VM_FRAME_MAGIC_RESCUE = 0x88880001,
-    VM_FRAME_MAGIC_DUMMY  = 0x99990001,
+    VM_FRAME_MAGIC_RESCUE = 0x78880001,
+    VM_FRAME_MAGIC_DUMMY  = 0x79990001,
 
-    VM_FRAME_MAGIC_MASK   = 0xffff0001,
+    VM_FRAME_MAGIC_MASK   = 0x7fff0001,
 
     /* frame flag */
     VM_FRAME_FLAG_PASSED    = 0x0010,
@@ -1405,6 +1415,7 @@ vm_proc_ep(VALUE procval)
 static inline const rb_iseq_t *
 vm_block_iseq(const struct rb_block *block)
 {
+    if (!block) return NULL;
     switch (vm_block_type(block)) {
       case block_type_iseq: return rb_iseq_check(block->as.captured.code.iseq);
       case block_type_proc: return vm_proc_iseq(block->as.proc);

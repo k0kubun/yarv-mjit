@@ -746,6 +746,12 @@ x = __ENCODING__
         end
       END
     end
+    assert_raise(SyntaxError) do
+      eval "#{<<~"begin;"}\n#{<<~'end;'}", nil, __FILE__, __LINE__+1
+      begin;
+        x, true
+      end;
+    end
   end
 
   def test_block_dup
@@ -1091,6 +1097,12 @@ x = __ENCODING__
     assert_raise(SyntaxError) { eval("def m\n\0""end") }
     assert_raise(SyntaxError) { eval("def m\n\C-d""end") }
     assert_raise(SyntaxError) { eval("def m\n\C-z""end") }
+  end
+
+  def test_location_of_invalid_token
+    assert_raise_with_message(SyntaxError, /^      \^~~\z/) do
+      eval('class xxx end')
+    end
   end
 
 =begin

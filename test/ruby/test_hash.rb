@@ -298,6 +298,9 @@ class TestHash < Test::Unit::TestCase
     b = {"ABC" => :t}
     assert_same a.keys[0], b.keys[0]
     assert_same "ABC".freeze, a.keys[0]
+    var = +'ABC'
+    c = { var => :t }
+    assert_same "ABC".freeze, c.keys[0]
   end
 
   def test_tainted_string_key
@@ -305,10 +308,10 @@ class TestHash < Test::Unit::TestCase
     h = {}
     h[str] = nil
     key = h.keys.first
-    assert_equal true, str.tainted?
-    assert_equal false, str.frozen?
-    assert_equal true, key.tainted?
-    assert_equal true, key.frozen?
+    assert_predicate str, :tainted?
+    assert_not_predicate str, :frozen?
+    assert_predicate key, :tainted?
+    assert_predicate key, :frozen?
   end
 
   def test_EQUAL # '=='

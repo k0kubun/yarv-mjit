@@ -1222,11 +1222,13 @@ static void
 ubf_wakeup_all_threads(void)
 {
     rb_thread_t *th;
+    native_thread_data_t *dat;
 
     if (!ubf_threads_empty()) {
 	rb_native_mutex_lock(&ubf_list_lock);
-	list_for_each(&ubf_list_head, th,
-		      native_thread_data.ubf_list) {
+	list_for_each(&ubf_list_head, dat, ubf_list) {
+	    th = (rb_thread_t *)(
+		((char *)dat) - offsetof(rb_thread_t, native_thread_data));
 	    ubf_wakeup_thread(th);
 	}
 	rb_native_mutex_unlock(&ubf_list_lock);

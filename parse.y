@@ -290,9 +290,10 @@ struct parser_params {
 #define STR_NEW3(p,n,e,func) parser_str_new((p),(n),(e),(func),current_enc)
 #define TOK_INTERN() intern_cstr(tok(), toklen(), current_enc)
 
-static int parser_yyerror(struct parser_params*, const char*);
-#define yyerror0(msg) parser_yyerror(parser, (msg))
-#define yyerror(yylloc, parser, msg) yyerror0(msg)
+static int parser_yyerror(struct parser_params*, const YYLTYPE *yylloc, const char*);
+#define yyerror0(msg) parser_yyerror(parser, NULL, (msg))
+#define yyerror1(loc, msg) parser_yyerror(parser, (loc), (msg))
+#define yyerror(yylloc, parser, msg) parser_yyerror(parser, yylloc, msg)
 #define token_flush(p) ((p)->lex.ptok = (p)->lex.pcur)
 
 #define lex_strterm		(parser->lex.strterm)
@@ -1339,7 +1340,7 @@ stmt_or_begin	: stmt
 		    }
                 | keyword_BEGIN
 		    {
-			yyerror0("BEGIN is permitted only at toplevel");
+			yyerror1(&@1, "BEGIN is permitted only at toplevel");
 		    /*%%%*/
 			/* local_push(0); */
 		    /*%
@@ -1392,7 +1393,7 @@ stmt		: keyword_alias fitem {SET_LEX_STATE(EXPR_FNAME|EXPR_FITEM);} fitem
 		| keyword_alias tGVAR tNTH_REF
 		    {
 		    /*%%%*/
-			yyerror0("can't make alias for the number variables");
+			yyerror1(&@3, "can't make alias for the number variables");
 			$$ = new_begin(0, &@$);
 		    /*%
 			$$ = dispatch2(var_alias, $2, $3);
@@ -1984,18 +1985,10 @@ mlhs_node	: user_variable
 lhs		: user_variable
 		    {
 			$$ = assignable(var_field($1), 0, &@$);
-		    /*%%%*/
-			if (!$$) $$ = new_begin(0, &@$);
-		    /*%
-		    %*/
 		    }
 		| keyword_variable
 		    {
 			$$ = assignable(var_field($1), 0, &@$);
-		    /*%%%*/
-			if (!$$) $$ = new_begin(0, &@$);
-		    /*%
-		    %*/
 		    }
 		| primary_value '[' opt_call_args rbracket
 		    {
@@ -2047,7 +2040,7 @@ lhs		: user_variable
 cname		: tIDENTIFIER
 		    {
 		    /*%%%*/
-			yyerror0("class/module name must be CONSTANT");
+			yyerror1(&@1, "class/module name must be CONSTANT");
 		    /*%
 			$$ = dispatch1(class_name_error, $1);
 			ripper_error();
@@ -2983,8 +2976,12 @@ primary		: literal
 		    }
 		| k_class cpath superclass
 		    {
-			if (in_def)
-			    yyerror0("class definition in method body");
+			if (in_def) {
+			    YYLTYPE location;
+			    location.first_loc = @1.first_loc;
+			    location.last_loc = @2.last_loc;
+			    yyerror1(&location, "class definition in method body");
+			}
 			$<num>1 = in_class;
 			in_class = 1;
 			local_push(0);
@@ -3034,8 +3031,12 @@ primary		: literal
 		    }
 		| k_module cpath
 		    {
-			if (in_def)
-			    yyerror0("module definition in method body");
+			if (in_def) {
+			    YYLTYPE location;
+			    location.first_loc = @1.first_loc;
+			    location.last_loc = @2.last_loc;
+			    yyerror1(&location, "module definition in method body");
+			}
 			$<num>1 = in_class;
 			in_class = 1;
 			local_push(0);
@@ -3243,7 +3244,7 @@ k_end		: keyword_end
 k_return	: keyword_return
 		    {
 			if (in_class && !in_def && !dyna_in_block())
-			    yyerror0("Invalid return in class/module body");
+			    yyerror1(&@1, "Invalid return in class/module body");
 		    }
 		;
 
@@ -4599,7 +4600,7 @@ f_args		: f_arg ',' f_optarg ',' f_rest_arg opt_args_tail
 f_bad_arg	: tCONSTANT
 		    {
 		    /*%%%*/
-			yyerror0("formal argument cannot be a constant");
+			yyerror1(&@1, "formal argument cannot be a constant");
 			$$ = 0;
 		    /*%
 			$$ = dispatch1(param_error, $1);
@@ -4609,7 +4610,7 @@ f_bad_arg	: tCONSTANT
 		| tIVAR
 		    {
 		    /*%%%*/
-			yyerror0("formal argument cannot be an instance variable");
+			yyerror1(&@1, "formal argument cannot be an instance variable");
 			$$ = 0;
 		    /*%
 			$$ = dispatch1(param_error, $1);
@@ -4619,7 +4620,7 @@ f_bad_arg	: tCONSTANT
 		| tGVAR
 		    {
 		    /*%%%*/
-			yyerror0("formal argument cannot be a global variable");
+			yyerror1(&@1, "formal argument cannot be a global variable");
 			$$ = 0;
 		    /*%
 			$$ = dispatch1(param_error, $1);
@@ -4629,7 +4630,7 @@ f_bad_arg	: tCONSTANT
 		| tCVAR
 		    {
 		    /*%%%*/
-			yyerror0("formal argument cannot be a class variable");
+			yyerror1(&@1, "formal argument cannot be a class variable");
 			$$ = 0;
 		    /*%
 			$$ = dispatch1(param_error, $1);
@@ -4892,7 +4893,7 @@ f_rest_arg	: restarg_mark tIDENTIFIER
 		    {
 		    /*%%%*/
 			if (!is_local_id($2))
-			    yyerror0("rest argument must be local variable");
+			    yyerror1(&@2, "rest argument must be local variable");
 		    /*% %*/
 			arg_var(shadowing_lvar(get_id($2)));
 		    /*%%%*/
@@ -4920,9 +4921,9 @@ f_block_arg	: blkarg_mark tIDENTIFIER
 		    {
 		    /*%%%*/
 			if (!is_local_id($2))
-			    yyerror0("block argument must be local variable");
+			    yyerror1(&@2, "block argument must be local variable");
 			else if (!dyna_in_block() && local_id($2))
-			    yyerror0("duplicated block argument name");
+			    yyerror1(&@2, "duplicated block argument name");
 		    /*% %*/
 			arg_var(shadowing_lvar(get_id($2)));
 		    /*%%%*/
@@ -4961,7 +4962,7 @@ singleton	: var_ref
 		    {
 		    /*%%%*/
 			if ($3 == 0) {
-			    yyerror0("can't define singleton method for ().");
+			    yyerror1(&@3, "can't define singleton method for ().");
 			}
 			else {
 			    switch (nd_type($3)) {
@@ -4973,7 +4974,7 @@ singleton	: var_ref
 			      case NODE_LIT:
 			      case NODE_ARRAY:
 			      case NODE_ZARRAY:
-				yyerror0("can't define singleton method for literals");
+				yyerror1(&@3, "can't define singleton method for literals");
 				break;
 			      default:
 				value_expr($3);
@@ -5346,24 +5347,39 @@ parser_precise_mbclen(struct parser_params *parser, const char *p)
 }
 
 static int
-parser_yyerror(struct parser_params *parser, const char *msg)
+parser_yyerror(struct parser_params *parser, const YYLTYPE *yylloc, const char *msg)
 {
 #ifndef RIPPER
     const int max_line_margin = 30;
-    const char *p, *pe;
+    const char *p, *pe, *pt, *pb;
     const char *pre = "", *post = "", *pend;
     const char *code = "", *caret = "", *newline = "";
     const char *lim;
     char *buf;
     long len;
     int i;
+    YYLTYPE current;
+
+    if (!yylloc) {
+	RUBY_SET_YYLLOC(current);
+	yylloc = &current;
+    }
+    else if ((ruby_sourceline != yylloc->first_loc.lineno &&
+	      ruby_sourceline != yylloc->last_loc.lineno) ||
+	     (yylloc->first_loc.lineno == yylloc->last_loc.lineno &&
+	      yylloc->first_loc.column == yylloc->last_loc.column)) {
+	compile_error(PARSER_ARG "%s", msg);
+	return 0;
+    }
 
     pend = lex_pend;
     if (pend > lex_pbeg && pend[-1] == '\n') {
 	if (--pend > lex_pbeg && pend[-1] == '\r') --pend;
     }
 
-    p = pe = lex_p < pend ? lex_p : pend;
+    pt = (ruby_sourceline == yylloc->last_loc.lineno) ?
+	    lex_pbeg + yylloc->last_loc.column : lex_pend;
+    p = pe = pt < pend ? pt : pend;
     lim = p - lex_pbeg > max_line_margin ? p - max_line_margin : lex_pbeg;
     while ((lim < p) && (*(p-1) != '\n')) p--;
 
@@ -5372,25 +5388,50 @@ parser_yyerror(struct parser_params *parser, const char *msg)
 
     len = pe - p;
     if (len > 4) {
-	char *p2;
-
 	if (p > lex_pbeg) {
-	    p = rb_enc_prev_char(lex_pbeg, p, lex_p, rb_enc_get(lex_lastline));
+	    p = rb_enc_prev_char(lex_pbeg, p, pt, rb_enc_get(lex_lastline));
 	    if (p > lex_pbeg) pre = "...";
 	}
 	if (pe < pend) {
-	    pe = rb_enc_prev_char(lex_p, pe, pend, rb_enc_get(lex_lastline));
+	    pe = rb_enc_prev_char(pt, pe, pend, rb_enc_get(lex_lastline));
 	    if (pe < pend) post = "...";
 	}
+    }
+    pb = lex_pbeg;
+    if (ruby_sourceline == yylloc->first_loc.lineno) {
+	pb += yylloc->first_loc.column;
+	if (pb > pt) pb = pt;
+    }
+    if (pb < p) pb = p;
+    if (len <= 4 && yylloc->first_loc.lineno == yylloc->last_loc.lineno) {
+	compile_error(PARSER_ARG "%s", msg);
+    }
+    else if (!parser->error_buffer && rb_stderr_tty_p()) {
+#define CSI_BEGIN "\033["
+#define CSI_SGR "m"
+	compile_error(PARSER_ARG "%s\n"
+		      CSI_BEGIN""CSI_SGR"%s" /* pre */
+		      CSI_BEGIN"1"CSI_SGR"%.*s"
+		      CSI_BEGIN"1;4"CSI_SGR"%.*s"
+		      CSI_BEGIN";1"CSI_SGR"%.*s"
+		      CSI_BEGIN""CSI_SGR"%s" /* post */,
+		      msg, pre,
+		      (int)(pb - p), p,
+		      (int)(pt - pb), pb,
+		      (int)(pe - pt), pt,
+		      post);
+    }
+    else {
+	char *p2;
+
 	len = pe - p;
-	lim = lex_p < pend ? lex_p : pend;
+	lim = pt < pend ? pt : pend;
 	i = (int)(lim - p);
 	buf = ALLOCA_N(char, i+2);
 	code = p;
 	caret = p2 = buf;
-	pe = (parser->tokp < lim ? parser->tokp : lim);
-	if (p <= pe) {
-	    while (p < pe) {
+	if (p <= pb) {
+	    while (p < pb) {
 		*p2++ = *p++ == '\t' ? '\t' : ' ';
 	    }
 	    *p2++ = '^';
@@ -5402,14 +5443,11 @@ parser_yyerror(struct parser_params *parser, const char *msg)
 	}
 	*p2 = '\0';
 	newline = "\n";
+	compile_error(PARSER_ARG "%s%s""%s%.*s%s%s""%s%s",
+		      msg, newline,
+		      pre, (int)len, code, post, newline,
+		      pre, caret);
     }
-    else {
-	len = 0;
-    }
-    compile_error(PARSER_ARG "%s%s""%s%.*s%s%s""%s%s",
-		  msg, newline,
-		  pre, (int)len, code, post, newline,
-		  pre, caret);
 #else
     dispatch1(parse_error, STR_NEW2(msg));
     ripper_error();
@@ -6723,8 +6761,8 @@ parser_heredoc_identifier(struct parser_params *parser)
 	    else if (newline) newline = 2;
 	}
 	if (c == -1) {
-	    compile_error(PARSER_ARG "unterminated here document identifier");
-	    return 0;
+	    yyerror(NULL, parser, "unterminated here document identifier");
+	    return -1;
 	}
 	switch (newline) {
 	  case 1:
@@ -9893,7 +9931,7 @@ rb_parser_fatal(struct parser_params *parser, const char *fmt, ...)
     rb_str_vcatf(mesg, fmt, ap);
     va_end(ap);
 #ifndef RIPPER
-    parser_yyerror(parser, RSTRING_PTR(mesg));
+    parser_yyerror(parser, NULL, RSTRING_PTR(mesg));
     RB_GC_GUARD(mesg);
 #else
     dispatch1(parse_error, mesg);
@@ -9967,32 +10005,34 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val, const YYLTYPE *lo
 #ifdef RIPPER
     ID id = get_id(lhs);
 # define assignable_result(x) (lhs)
-# define parser_yyerror(parser, x) (lhs = assign_error_gen(parser, lhs))
+# define assignable_error() (lhs)
+# define parser_yyerror(parser, loc, x) (lhs = assign_error_gen(parser, lhs))
 #else
 # define assignable_result(x) assignable_result0(x, location)
+# define assignable_error() new_begin(0, location)
 #endif
-    if (!id) return assignable_result(0);
+    if (!id) return assignable_error();
     switch (id) {
       case keyword_self:
-	yyerror0("Can't change the value of self");
+	yyerror1(location, "Can't change the value of self");
 	goto error;
       case keyword_nil:
-	yyerror0("Can't assign to nil");
+	yyerror1(location, "Can't assign to nil");
 	goto error;
       case keyword_true:
-	yyerror0("Can't assign to true");
+	yyerror1(location, "Can't assign to true");
 	goto error;
       case keyword_false:
-	yyerror0("Can't assign to false");
+	yyerror1(location, "Can't assign to false");
 	goto error;
       case keyword__FILE__:
-	yyerror0("Can't assign to __FILE__");
+	yyerror1(location, "Can't assign to __FILE__");
 	goto error;
       case keyword__LINE__:
-	yyerror0("Can't assign to __LINE__");
+	yyerror1(location, "Can't assign to __LINE__");
 	goto error;
       case keyword__ENCODING__:
-	yyerror0("Can't assign to __ENCODING__");
+	yyerror1(location, "Can't assign to __ENCODING__");
 	goto error;
     }
     switch (id_type(id)) {
@@ -10026,7 +10066,7 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val, const YYLTYPE *lo
       case ID_CONST:
 	if (!in_def)
 	    return assignable_result(new_cdecl(id, val, 0, location));
-	yyerror0("dynamic constant assignment");
+	yyerror1(location, "dynamic constant assignment");
 	break;
       case ID_CLASS:
 	return assignable_result(NEW_CVASGN(id, val));
@@ -10034,7 +10074,7 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val, const YYLTYPE *lo
 	compile_error(PARSER_ARG "identifier %"PRIsVALUE" is not valid to set", rb_id2str(id));
     }
   error:
-    return assignable_result(0);
+    return assignable_error();
 #undef assignable_result
 #undef parser_yyerror
 }
@@ -10269,7 +10309,7 @@ value_expr_gen(struct parser_params *parser, NODE *node)
 	  case NODE_NEXT:
 	  case NODE_REDO:
 	  case NODE_RETRY:
-	    if (!cond) yyerror0("void value expression");
+	    if (!cond) yyerror1(&node->nd_loc, "void value expression");
 	    /* or "control never reach"? */
 	    return FALSE;
 
@@ -11082,7 +11122,7 @@ static NODE *
 const_decl_gen(struct parser_params *parser, NODE *path, const YYLTYPE *location)
 {
     if (in_def) {
-	yyerror0("dynamic constant assignment");
+	yyerror1(location, "dynamic constant assignment");
     }
     return new_cdecl(0, 0, (path), location);
 }
