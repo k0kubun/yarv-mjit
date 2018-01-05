@@ -272,7 +272,7 @@ usage(const char *name, int help)
 	M("s",     ", save-temps",     "Save MJIT temporary files in $TMP or /tmp"),
 	M("w",     ", warnings",       "Enable printing MJIT warnings"),
 	M("d",     ", debug",          "Enable MJIT debugging (very slow)"),
-	M("a=num", ", aot=num",        "Ahead of Time Compileation after num calls"),
+	M("a=num", ", aot=num",        "Ahead of Time Compilation after num calls"),
 	M("v=num", ", verbose=num",    "Print MJIT logs of level num or less to stderr"),
 	M("n=num", ", num-cache=num",  "Maximum number of JIT codes in a cache"),
     };
