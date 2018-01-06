@@ -190,6 +190,17 @@ compile_case_dispatch_each(VALUE key, VALUE value, VALUE arg)
     return ST_CONTINUE;
 }
 
+/* After method is called, TracePoint may be enabled. For such case, JIT
+   execution should be canceled immediately. */
+static void
+fprint_trace_cancel(FILE *f, unsigned int stack_size)
+{
+    fprintf(f, "  if (ruby_vm_event_enabled_flags & ISEQ_TRACE_EVENTS) {\n");
+    fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
+    fprintf(f, "    return Qundef; /* cancel JIT */\n");
+    fprintf(f, "  }\n");
+}
+
 static void compile_insns(FILE *f, const struct rb_iseq_constant_body *body, unsigned int stack_size,
 	                  unsigned int pos, struct compile_status *status);
 
@@ -414,6 +425,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	break; */
       case BIN(send):
 	b->stack_size += compile_send(f, insn, operands, b->stack_size, TRUE);
+	fprint_trace_cancel(f, b->stack_size);
 	break;
       case BIN(opt_str_freeze):
 	fprintf(f, "  if (BASIC_OP_UNREDEFINED_P(BOP_FREEZE, STRING_REDEFINED_OP_FLAG)) {\n");
@@ -443,6 +455,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	break;
       case BIN(opt_send_without_block):
 	b->stack_size += compile_send(f, insn, operands, b->stack_size, FALSE);
+	fprint_trace_cancel(f, b->stack_size);
 	break;
       case BIN(invokesuper):
 	{
@@ -466,6 +479,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    }\n");
 	    fprintf(f, "  }\n");
 	    b->stack_size -= push_count;
+	    fprint_trace_cancel(f, b->stack_size);
 	}
 	break;
       case BIN(invokeblock):
@@ -495,6 +509,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    }\n");
 	    fprintf(f, "  }\n");
 	    b->stack_size += 1 - ci->orig_argc;
+	    fprint_trace_cancel(f, b->stack_size);
 	}
 	break;
       case BIN(leave):
