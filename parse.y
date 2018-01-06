@@ -450,8 +450,8 @@ static NODE *new_qcall_gen(struct parser_params* parser, ID atype, NODE *recv, I
 #define new_command_qcall(q,r,m,a,location) new_qcall_gen(parser,q,r,m,a,location)
 static NODE *new_command_gen(struct parser_params*parser, NODE *m, NODE *a) {m->nd_args = a; return m;}
 #define new_command(m,a) new_command_gen(parser, m, a)
-static NODE *method_add_block_gen(struct parser_params*parser, NODE *m, NODE *b) {b->nd_iter = m; return b;}
-#define method_add_block(m,b) method_add_block_gen(parser, m, b)
+static NODE *method_add_block_gen(struct parser_params*parser, NODE *m, NODE *b, const YYLTYPE *location) {b->nd_iter = m; b->nd_loc = *location; return b;}
+#define method_add_block(m,b,location) method_add_block_gen(parser, m, b, location)
 
 static NODE *new_args_gen(struct parser_params*,NODE*,NODE*,ID,NODE*,NODE*,const YYLTYPE*);
 #define new_args(f,o,r,p,t,location) new_args_gen(parser, (f),(o),(r),(p),(t),(location))
@@ -873,7 +873,7 @@ static void ripper_error_gen(struct parser_params *parser);
 
 #define method_optarg(m,a) ((a)==Qundef ? (m) : dispatch2(method_add_arg,(m),(a)))
 #define method_arg(m,a) dispatch2(method_add_arg,(m),(a))
-#define method_add_block(m,b) dispatch2(method_add_block, (m), (b))
+#define method_add_block(m,b,location) dispatch2(method_add_block, (m), (b))
 
 #define escape_Qundef(x) ((x)==Qundef ? Qnil : (x))
 
@@ -1684,10 +1684,9 @@ command		: fcall command_args       %prec tLOWEST
 		    {
 			block_dup_check($2,$3);
 			$$ = new_command($1, $2);
-			$$ = method_add_block($$, $3);
+			$$ = method_add_block($$, $3, &@$);
 			fixpos($$, $1);
 		    /*%%%*/
-			$$->nd_loc = @$;
 			nd_set_last_loc($1, nd_last_loc($2));
 		    /*%
 		    %*/
@@ -1701,12 +1700,8 @@ command		: fcall command_args       %prec tLOWEST
 		    {
 			block_dup_check($4,$5);
 			$$ = new_command_qcall($2, $1, $3, $4, &@$);
-			$$ = method_add_block($$, $5);
+			$$ = method_add_block($$, $5, &@$);
 			fixpos($$, $1);
-		    /*%%%*/
-			$$->nd_loc = @$;
-		    /*%
-		    %*/
 		   }
 		| primary_value tCOLON2 operation2 command_args	%prec tLOWEST
 		    {
@@ -1717,12 +1712,8 @@ command		: fcall command_args       %prec tLOWEST
 		    {
 			block_dup_check($4,$5);
 			$$ = new_command_qcall(ID2VAL(idCOLON2), $1, $3, $4, &@$);
-			$$ = method_add_block($$, $5);
+			$$ = method_add_block($$, $5, &@$);
 			fixpos($$, $1);
-		    /*%%%*/
-			$$->nd_loc = @$;
-		    /*%
-		    %*/
 		   }
 		| keyword_super command_args
 		    {
@@ -2827,12 +2818,10 @@ primary		: literal
 		| fcall brace_block
 		    {
 		    /*%%%*/
-			$2->nd_iter = $1;
-			$2->nd_loc = @$;
-			$$ = $2;
+			$$ = method_add_block($1, $2, &@$);
 		    /*%
 			$$ = method_arg(dispatch1(fcall, $1), arg_new());
-			$$ = method_add_block($$, $2);
+			$$ = method_add_block($$, $2, &@$);
 		    %*/
 		    }
 		| method_call
@@ -2840,11 +2829,9 @@ primary		: literal
 		    {
 		    /*%%%*/
 			block_dup_check($1->nd_args, $2);
-			$2->nd_iter = $1;
-			$2->nd_loc = @$;
-			$$ = $2;
+			$$ = method_add_block($1, $2, &@$);
 		    /*%
-			$$ = method_add_block($1, $2);
+			$$ = method_add_block($1, $2, &@$);
 		    %*/
 		    }
 		| tLAMBDA lambda
@@ -3077,7 +3064,7 @@ primary		: literal
 		    /*%%%*/
 			NODE *body = remove_begin($6);
 			reduce_nodes(&body);
-			$$ = NEW_DEFN($2, $5, body, METHOD_VISI_PRIVATE);
+			$$ = NEW_DEFN($2, $5, body);
 			$$->nd_defn->nd_loc = @$;
 			set_line_body(body, $<num>1);
 			nd_set_line($$, $<num>1);
@@ -3675,12 +3662,10 @@ block_call	: command do_block
 			else {
 			    block_dup_check($1->nd_args, $2);
 			}
-			$2->nd_iter = $1;
-			$2->nd_loc = @$;
-			$$ = $2;
+			$$ = method_add_block($1, $2, &@$);
 			fixpos($$, $1);
 		    /*%
-			$$ = method_add_block($1, $2);
+			$$ = method_add_block($1, $2, &@$);
 		    %*/
 		    }
 		| block_call call_op2 operation2 opt_paren_args
@@ -3691,26 +3676,24 @@ block_call	: command do_block
 		    {
 		    /*%%%*/
 			block_dup_check($4, $5);
-			$5->nd_iter = new_command_qcall($2, $1, $3, $4, &@$);
-			$5->nd_loc = @$;
-			$$ = $5;
+			$$ = new_command_qcall($2, $1, $3, $4, &@$);
+			$$ = method_add_block($$, $5, &@$);
 			fixpos($$, $1);
 		    /*%
 			$$ = dispatch4(command_call, $1, $2, $3, $4);
-			$$ = method_add_block($$, $5);
+			$$ = method_add_block($$, $5, &@$);
 		    %*/
 		    }
 		| block_call call_op2 operation2 command_args do_block
 		    {
 		    /*%%%*/
 			block_dup_check($4, $5);
-			$5->nd_iter = new_command_qcall($2, $1, $3, $4, &@$);
-			$5->nd_loc = @$;
-			$$ = $5;
+			$$ = new_command_qcall($2, $1, $3, $4, &@$);
+			$$ = method_add_block($$, $5, &@$);
 			fixpos($$, $1);
 		    /*%
 			$$ = dispatch4(command_call, $1, $2, $3, $4);
-			$$ = method_add_block($$, $5);
+			$$ = method_add_block($$, $5, &@$);
 		    %*/
 		    }
 		;
@@ -3968,7 +3951,7 @@ strings		: string
 string		: tCHAR
 		    {
 		    /*%%%*/
-			$$->nd_loc = @$;
+			nd_set_loc($$, &@$);
 		    /*%
 		    %*/
 		    }
@@ -4118,7 +4101,7 @@ qword_list	: /* none */
 		| qword_list tSTRING_CONTENT ' '
 		    {
 		    /*%%%*/
-			$2->nd_loc = @2;
+			nd_set_loc($2, &@2);
 			$$ = list_append($1, $2);
 		    /*%
 			$$ = dispatch2(qwords_add, $1, $2);
@@ -4141,7 +4124,7 @@ qsym_list	: /* none */
 			lit = $2->nd_lit;
 			nd_set_type($2, NODE_LIT);
 			add_mark_object($2->nd_lit = ID2SYM(rb_intern_str(lit)));
-			$2->nd_loc = @2;
+			nd_set_loc($2, &@2);
 			$$ = list_append($1, $2);
 		    /*%
 			$$ = dispatch2(qsymbols_add, $1, $2);
@@ -4237,7 +4220,7 @@ regexp_contents: /* none */
 string_content	: tSTRING_CONTENT
 		    {
 		    /*%%%*/
-			$$->nd_loc = @$;
+			nd_set_loc($$, &@$);
 		    /*%
 		    %*/
 		    }
@@ -5646,7 +5629,7 @@ yycompile0(VALUE arg)
 	    mesg = rb_class_new_instance(0, 0, rb_eSyntaxError);
 	}
 	rb_set_errinfo(mesg);
-	return 0;
+	return FALSE;
     }
     tree = ruby_eval_tree;
     if (!tree) {
@@ -5658,21 +5641,29 @@ yycompile0(VALUE arg)
 	NODE *body = parser_append_options(parser, tree->nd_body);
 	if (!opt) opt = rb_obj_hide(rb_ident_hash_new());
 	rb_hash_aset(opt, rb_sym_intern_ascii_cstr("coverage_enabled"), cov);
-	prelude = NEW_PRELUDE(ruby_eval_tree_begin, body, opt);
+	prelude = block_append(ruby_eval_tree_begin, body, &body->nd_loc /* dummy location */);
 	add_mark_object(opt);
-	prelude->nd_loc = body->nd_loc;
 	tree->nd_body = prelude;
+	parser->ast->body.compile_option = opt;
     }
-    return (VALUE)tree;
+    parser->ast->body.root = tree;
+    return TRUE;
 }
 
-static NODE*
-yycompile(struct parser_params *parser, VALUE fname, int line)
+static rb_ast_t *
+yycompile(VALUE vparser, struct parser_params *parser, VALUE fname, int line)
 {
+    rb_ast_t *ast;
     ruby_sourcefile_string = rb_str_new_frozen(fname);
     ruby_sourcefile = RSTRING_PTR(fname);
     ruby_sourceline = line - 1;
-    return (NODE *)rb_suppress_tracing(yycompile0, (VALUE)parser);
+
+    parser->ast = ast = rb_ast_new();
+    rb_suppress_tracing(yycompile0, (VALUE)parser);
+    parser->ast = 0;
+    RB_GC_GUARD(vparser); /* prohibit tail call optimization */
+
+    return ast;
 }
 #endif /* !RIPPER */
 
@@ -5731,21 +5722,15 @@ static rb_ast_t*
 parser_compile_string(VALUE vparser, VALUE fname, VALUE s, int line)
 {
     struct parser_params *parser;
-    rb_ast_t *ast;
 
     TypedData_Get_Struct(vparser, struct parser_params, &parser_data_type, parser);
-    parser->ast = ast = rb_ast_new();
 
     lex_gets = lex_get_str;
     lex_gets_ptr = 0;
     lex_input = rb_str_new_frozen(s);
     lex_pbeg = lex_p = lex_pend = 0;
 
-    ast->root = yycompile(parser, fname, line);
-    parser->ast = 0;
-    RB_GC_GUARD(vparser); /* prohibit tail call optimization */
-
-    return ast;
+    return yycompile(vparser, parser, fname, line);
 }
 
 rb_ast_t*
@@ -5808,20 +5793,14 @@ rb_ast_t*
 rb_parser_compile_file_path(VALUE vparser, VALUE fname, VALUE file, int start)
 {
     struct parser_params *parser;
-    rb_ast_t *ast;
 
     TypedData_Get_Struct(vparser, struct parser_params, &parser_data_type, parser);
-    parser->ast = ast = rb_ast_new();
 
     lex_gets = lex_io_gets;
     lex_input = file;
     lex_pbeg = lex_p = lex_pend = 0;
 
-    ast->root = yycompile(parser, fname, start);
-    parser->ast = 0;
-    RB_GC_GUARD(vparser); /* prohibit tail call optimization */
-
-    return ast;
+    return yycompile(vparser, parser, fname, start);
 }
 #endif  /* !RIPPER */
 
@@ -9322,7 +9301,7 @@ new_qcall_gen(struct parser_params* parser, ID atype, NODE *recv, ID mid, NODE *
     return qcall;
 }
 
-#define nd_once_body(node) (nd_type(node) == NODE_SCOPE ? (node)->nd_body : node)
+#define nd_once_body(node) (nd_type(node) == NODE_ONCE ? (node)->nd_body : node)
 static NODE*
 match_op_gen(struct parser_params *parser, NODE *node1, NODE *node2, const YYLTYPE *op_loc, const YYLTYPE *location)
 {
@@ -9564,7 +9543,7 @@ new_regexp_gen(struct parser_params *parser, NODE *node, int options, const YYLT
 	    add_mark_object(node->nd_lit = reg_compile(src, options));
 	}
 	if (options & RE_OPTION_ONCE) {
-	    node = NEW_NODE(NODE_SCOPE, 0, node, 0);
+	    node = NEW_NODE(NODE_ONCE, 0, node, 0);
 	    nd_set_loc(node, location);
 	}
 	break;

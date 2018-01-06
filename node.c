@@ -22,6 +22,7 @@
 #define A_INT(val) rb_str_catf(buf, "%d", (val))
 #define A_LONG(val) rb_str_catf(buf, "%ld", (val))
 #define A_LIT(lit) AR(rb_inspect(lit))
+#define A_OPERATOR(id) add_operator(buf, (id))
 #define A_NODE_HEADER(node, term) \
     rb_str_catf(buf, "@ %s (line: %d, code_range: (%d,%d)-(%d,%d))"term, \
 	ruby_node_name(nd_type(node)), nd_line(node), nd_first_lineno(node), nd_first_column(node), nd_last_lineno(node), nd_last_column(node))
@@ -59,12 +60,11 @@
 #define F_INT(name, ann)	    SIMPLE_FIELD1(#name, ann) A_INT(node->name)
 #define F_LONG(name, ann)	    SIMPLE_FIELD1(#name, ann) A_LONG(node->name)
 #define F_LIT(name, ann)	    SIMPLE_FIELD1(#name, ann) A_LIT(node->name)
+#define F_OPERATOR(name, ann)	    SIMPLE_FIELD1(#name, ann) A_OPERATOR(node->name)
 #define F_MSG(name, ann, desc)	    SIMPLE_FIELD1(#name, ann) A(desc)
 
 #define F_NODE(name, ann) \
     COMPOUND_FIELD1(#name, ann) {dump_node(buf, indent, comment, node->name);}
-#define F_OPTION(name, ann) \
-    COMPOUND_FIELD1(#name, ann) {dump_option(buf, indent, node->name);}
 
 #define ANN(ann) \
     if (comment) { \
@@ -96,47 +96,26 @@ add_id(VALUE buf, ID id)
     }
 }
 
+static void
+add_operator(VALUE buf, ID id)
+{
+    switch (id) {
+	case 0: A("0 (||)"); break;
+	case 1: A("1 (&&)"); break;
+	default: A_ID(id);
+    }
+}
+
 struct add_option_arg {
     VALUE buf, indent;
     st_index_t count;
 };
 
-static int
-add_option_i(VALUE key, VALUE val, VALUE args)
-{
-    struct add_option_arg *argp = (void *)args;
-    VALUE buf = argp->buf;
-    VALUE indent = argp->indent;
-
-    A_INDENT;
-    A("+- ");
-    AR(rb_sym2str(key));
-    A(": ");
-    A_LIT(val);
-    A("\n");
-    return ST_CONTINUE;
-}
-
-static void
-dump_option(VALUE buf, VALUE indent, VALUE opt)
-{
-    struct add_option_arg arg;
-
-    if (!RB_TYPE_P(opt, T_HASH)) {
-	A_LIT(opt);
-	return;
-    }
-    arg.buf = buf;
-    arg.indent = indent;
-    arg.count = 0;
-    rb_hash_foreach(opt, add_option_i, (VALUE)&arg);
-}
-
-static void dump_node(VALUE, VALUE, int, NODE *);
+static void dump_node(VALUE, VALUE, int, const NODE *);
 static const char default_indent[] = "|   ";
 
 static void
-dump_array(VALUE buf, VALUE indent, int comment, NODE *node)
+dump_array(VALUE buf, VALUE indent, int comment, const NODE *node)
 {
     int field_flag;
     const char *next_indent = default_indent;
@@ -151,7 +130,7 @@ dump_array(VALUE buf, VALUE indent, int comment, NODE *node)
 }
 
 static void
-dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
+dump_node(VALUE buf, VALUE indent, int comment, const NODE * node)
 {
     int field_flag;
     int i;
@@ -448,13 +427,7 @@ dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
 	ANN("format: [nd_value] [ [nd_args->nd_body] ] [nd_vid]= [nd_args->nd_head]");
 	ANN("example: ary[1] += foo");
 	F_NODE(nd_recv, "receiver");
-	F_CUSTOM1(nd_mid, "operator") {
-	    switch (node->nd_mid) {
-	      case 0: A("0 (||)"); break;
-	      case 1: A("1 (&&)"); break;
-	      default: A_ID(node->nd_mid);
-	    }
-	}
+	F_OPERATOR(nd_mid, "operator");
 	F_NODE(nd_args->nd_head, "index");
 	LAST_NODE;
 	F_NODE(nd_args->nd_body, "rvalue");
@@ -470,13 +443,7 @@ dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
 	    if (node->nd_next->nd_aid) A("? ");
 	    A_ID(node->nd_next->nd_vid);
 	}
-	F_CUSTOM1(nd_next->nd_mid, "operator") {
-	    switch (node->nd_next->nd_mid) {
-	      case 0: A("0 (||)"); break;
-	      case 1: A("1 (&&)"); break;
-	      default: A_ID(node->nd_next->nd_mid);
-	    }
-	}
+	F_OPERATOR(nd_next->nd_mid, "operator");
 	LAST_NODE;
 	F_NODE(nd_value, "rvalue");
 	return;
@@ -501,13 +468,7 @@ dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
 	ANN("format: [nd_head](constant) [nd_aid]= [nd_value]");
 	ANN("example: A::B ||= 1");
 	F_NODE(nd_head, "constant");
-	F_CUSTOM1(nd_aid, "operator") {
-	    switch (node->nd_aid) {
-	      case 0: A("0 (||)"); break;
-	      case 1: A("1 (&&)"); break;
-	      default: A_ID(node->nd_mid);
-	    }
-	}
+	F_OPERATOR(nd_aid, "operator");
 	LAST_NODE;
 	F_NODE(nd_value, "rvalue");
 	return;
@@ -716,6 +677,13 @@ dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
 	F_LIT(nd_lit, "literal");
 	return;
 
+      case NODE_ONCE:
+	ANN("once evaluation");
+	ANN("format: [nd_body]");
+	ANN("example: /foo#{ bar }baz/o");
+	LAST_NODE;
+	F_NODE(nd_body, "body");
+	return;
       case NODE_DSTR:
 	ANN("string literal with interpolation");
 	ANN("format: [nd_lit]");
@@ -953,19 +921,6 @@ dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
 	F_NODE(nd_args, "arguments");
 	return;
 
-      case NODE_PRELUDE:
-	ANN("pre-execution");
-	ANN("format: BEGIN { [nd_head] }; [nd_body]");
-	ANN("example: bar; BEGIN { foo }");
-	F_NODE(nd_head, "prelude");
-	if (!node->nd_compile_option) LAST_NODE;
-	F_NODE(nd_body, "body");
-	if (node->nd_compile_option) {
-	    LAST_NODE;
-	    F_OPTION(nd_compile_option, "compile_option");
-	}
-	return;
-
       case NODE_LAMBDA:
 	ANN("lambda expression");
 	ANN("format: -> [nd_body]");
@@ -1049,7 +1004,7 @@ dump_node(VALUE buf, VALUE indent, int comment, NODE *node)
 }
 
 VALUE
-rb_parser_dump_tree(NODE *node, int comment)
+rb_parser_dump_tree(const NODE *node, int comment)
 {
     VALUE buf = rb_str_new_cstr(
 	"###########################################################\n"
@@ -1143,7 +1098,7 @@ rb_ast_delete_node(rb_ast_t *ast, NODE *n)
 rb_ast_t *
 rb_ast_new(void)
 {
-    return (rb_ast_t *)rb_imemo_new(imemo_ast, 0, (VALUE)rb_node_buffer_new(), rb_ary_tmp_new(0), 0);
+    return (rb_ast_t *)rb_imemo_new(imemo_ast, rb_ary_tmp_new(0), 0, 0, (VALUE)rb_node_buffer_new());
 }
 
 void

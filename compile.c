@@ -29,13 +29,12 @@
 #undef RUBY_UNTYPED_DATA_WARNING
 #define RUBY_UNTYPED_DATA_WARNING 0
 
-#define ISEQ_TYPE_ONCE_GUARD ISEQ_TYPE_DEFINED_GUARD
-
 #define FIXNUM_INC(n, i) ((n)+(INT2FIX(i)&~FIXNUM_FLAG))
 #define FIXNUM_OR(n, i) ((n)|INT2FIX(i))
 
 typedef struct iseq_link_element {
     enum {
+	ISEQ_ELEMENT_ANCHOR,
 	ISEQ_ELEMENT_LABEL,
 	ISEQ_ELEMENT_INSN,
 	ISEQ_ELEMENT_ADJUST,
@@ -320,8 +319,8 @@ static void iseq_add_setlocal(rb_iseq_t *iseq, LINK_ANCHOR *const seq, int line,
 			   (VALUE)(ls) | 1, (VALUE)(le) | 1,			\
 			   (VALUE)(iseqv), (VALUE)(lc) | 1);			\
     LABEL_UNREMOVABLE(ls);							\
-    LABEL_UNREMOVABLE(le);							\
-    LABEL_UNREMOVABLE(lc);							\
+    LABEL_REF(le);								\
+    LABEL_REF(lc);								\
     rb_ary_push(ISEQ_COMPILE_DATA(iseq)->catch_table_ary, freeze_hide_obj(_e));	\
 } while (0)
 
@@ -438,7 +437,7 @@ do { \
 /* leave name uninitialized so that compiler warn if INIT_ANCHOR is
  * missing */
 #define DECL_ANCHOR(name) \
-    LINK_ANCHOR name[1] = {{{0,},}}
+    LINK_ANCHOR name[1] = {{{ISEQ_ELEMENT_ANCHOR,},}}
 #define INIT_ANCHOR(name) \
     (name->last = &name->anchor)
 
@@ -611,19 +610,29 @@ validate_labels(rb_iseq_t *iseq, st_table *labels_table)
 }
 
 VALUE
+rb_iseq_compile_ifunc(rb_iseq_t *iseq, const struct vm_ifunc *ifunc)
+{
+    DECL_ANCHOR(ret);
+    INIT_ANCHOR(ret);
+
+    (*ifunc->func)(iseq, ret, ifunc->data);
+
+    ADD_INSN(ret, ISEQ_COMPILE_DATA(iseq)->last_line, leave);
+
+    return iseq_setup(iseq, ret);
+}
+
+VALUE
 rb_iseq_compile_node(rb_iseq_t *iseq, const NODE *node)
 {
     DECL_ANCHOR(ret);
     INIT_ANCHOR(ret);
 
+    VM_ASSERT(!imemo_type_p((VALUE)node, imemo_ifunc));
+
     if (node == 0) {
 	COMPILE(ret, "nil", node);
 	iseq_set_local_table(iseq, 0);
-    }
-    else if (imemo_type_p((VALUE)node, imemo_ifunc)) {
-	const struct vm_ifunc *ifunc = (struct vm_ifunc *)node;
-	/* user callback */
-	(*ifunc->func)(iseq, ret, ifunc->data);
     }
     /* assume node is T_NODE */
     else if (nd_type(node) == NODE_SCOPE) {
@@ -695,9 +704,8 @@ rb_iseq_compile_node(rb_iseq_t *iseq, const NODE *node)
 	    iseq_set_exception_local_table(iseq);
 	    CHECK(COMPILE_POPPED(ret, "ensure", node));
 	    break;
-	  case ISEQ_TYPE_DEFINED_GUARD:
-	    iseq_set_exception_local_table(iseq);
-	    CHECK(COMPILE(ret, "defined guard", node));
+	  case ISEQ_TYPE_PLAIN:
+	    CHECK(COMPILE(ret, "ensure", node));
 	    break;
 	  default:
 	    COMPILE_ERROR(ERROR_ARGS "unknown scope: %d", iseq->body->type);
@@ -1216,12 +1224,31 @@ new_child_iseq(rb_iseq_t *iseq, const NODE *const node,
 	       VALUE name, const rb_iseq_t *parent, enum iseq_type type, int line_no)
 {
     rb_iseq_t *ret_iseq;
+    rb_ast_body_t ast;
+
+    ast.root = node;
+    ast.compile_option = 0;
 
     debugs("[new_child_iseq]> ---------------------------------------\n");
-    ret_iseq = rb_iseq_new_with_opt(node, name,
+    ret_iseq = rb_iseq_new_with_opt(&ast, name,
 				    rb_iseq_path(iseq), rb_iseq_realpath(iseq),
 				    INT2FIX(line_no), parent, type, ISEQ_COMPILE_DATA(iseq)->option);
     debugs("[new_child_iseq]< ---------------------------------------\n");
+    iseq_add_mark_object(iseq, (VALUE)ret_iseq);
+    return ret_iseq;
+}
+
+static rb_iseq_t *
+new_child_iseq_ifunc(rb_iseq_t *iseq, const struct vm_ifunc *ifunc,
+		     VALUE name, const rb_iseq_t *parent, enum iseq_type type, int line_no)
+{
+    rb_iseq_t *ret_iseq;
+
+    debugs("[new_child_iseq_ifunc]> ---------------------------------------\n");
+    ret_iseq = rb_iseq_new_ifunc(ifunc, name,
+				 rb_iseq_path(iseq), rb_iseq_realpath(iseq),
+				 INT2FIX(line_no), parent, type, ISEQ_COMPILE_DATA(iseq)->option);
+    debugs("[new_child_iseq_ifunc]< ---------------------------------------\n");
     iseq_add_mark_object(iseq, (VALUE)ret_iseq);
     return ret_iseq;
 }
@@ -1712,7 +1739,7 @@ get_ivar_ic_value(rb_iseq_t *iseq,ID id)
 }
 
 #define BADINSN_DUMP(anchor, list, dest) \
-    dump_disasm_list_with_cursor(&anchor->anchor, list, dest)
+    dump_disasm_list_with_cursor(FIRST_ELEMENT(anchor), list, dest)
 
 #define BADINSN_ERROR \
     (xfree(generated_iseq), \
@@ -1923,6 +1950,7 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *const anchor)
 		}
 		break;
 	    }
+	  default: break;
 	}
 	list = list->next;
     }
@@ -2242,6 +2270,7 @@ get_destination_insn(INSN *iobj)
 		events |= trace->event;
 	    }
 	    break;
+	  default: break;
 	}
 	list = list->next;
     }
@@ -2301,33 +2330,58 @@ replace_destination(INSN *dobj, INSN *nobj)
     if (!dl->refcnt) ELEM_REMOVE(&dl->link);
 }
 
+static LABEL*
+find_destination(INSN *i)
+{
+    int pos, len = insn_len(i->insn_id);
+    for (pos = 0; pos < len; ++pos) {
+	if (insn_op_types(i->insn_id)[pos] == TS_OFFSET) {
+	    return (LABEL *)OPERAND_AT(i, pos);
+	}
+    }
+    return 0;
+}
+
 static int
 remove_unreachable_chunk(rb_iseq_t *iseq, LINK_ELEMENT *i)
 {
     LINK_ELEMENT *first = i, *end;
+    int *unref_counts = 0, nlabels = ISEQ_COMPILE_DATA(iseq)->label_no;
 
     if (!i) return 0;
-    while (i) {
+    unref_counts = ALLOCA_N(int, nlabels);
+    MEMZERO(unref_counts, int, nlabels);
+    end = i;
+    do {
+	LABEL *lab;
 	if (IS_INSN(i)) {
-	    if (IS_INSN_ID(i, jump) || IS_INSN_ID(i, leave)) {
+	    if (IS_INSN_ID(i, leave)) {
+		end = i;
 		break;
+	    }
+	    else if ((lab = find_destination((INSN *)i)) != 0) {
+		if (lab->unremovable) break;
+		unref_counts[lab->label_no]++;
 	    }
 	}
 	else if (IS_LABEL(i)) {
-	    if (((LABEL *)i)->unremovable) return 0;
-	    if (((LABEL *)i)->refcnt > 0) {
+	    lab = (LABEL *)i;
+	    if (lab->unremovable) return 0;
+	    if (lab->refcnt > unref_counts[lab->label_no]) {
 		if (i == first) return 0;
-		i = i->prev;
 		break;
 	    }
+	    continue;
 	}
 	else if (IS_TRACE(i)) {
 	    /* do nothing */
 	}
-	else return 0;
-	i = i->next;
-    }
-    end = i;
+	else if (IS_ADJUST(i)) {
+	    LABEL *dest = ((ADJUST *)i)->label;
+	    if (dest && dest->unremovable) return 0;
+	}
+	end = i;
+    } while ((i = i->next) != 0);
     i = first;
     do {
 	if (IS_INSN(i)) {
@@ -2422,6 +2476,7 @@ iseq_peephole_optimize(rb_iseq_t *iseq, LINK_ELEMENT *list, const int do_tailcal
 	    goto again;
 	}
 	else if (IS_INSN_ID(diobj, leave)) {
+	    INSN *pop;
 	    /*
 	     *  jump LABEL
 	     *  ...
@@ -2429,6 +2484,7 @@ iseq_peephole_optimize(rb_iseq_t *iseq, LINK_ELEMENT *list, const int do_tailcal
 	     *  leave
 	     * =>
 	     *  leave
+	     *  pop
 	     *  ...
 	     * LABEL:
 	     *  leave
@@ -2438,6 +2494,9 @@ iseq_peephole_optimize(rb_iseq_t *iseq, LINK_ELEMENT *list, const int do_tailcal
 	    iobj->insn_id = BIN(leave);
 	    iobj->operand_size = 0;
 	    iobj->insn_info = diobj->insn_info;
+	    /* adjust stack depth */
+	    pop = new_insn_body(iseq, diobj->insn_info.line_no, BIN(pop), 0);
+	    ELEM_INSERT_NEXT(&iobj->link, &pop->link);
 	    goto again;
 	}
 	else if ((piobj = (INSN *)get_prev_insn(iobj)) != 0 &&
@@ -4208,6 +4267,14 @@ defined_expr0(rb_iseq_t *iseq, LINK_ANCHOR *const ret,
     return 0;
 }
 
+static VALUE
+build_defined_rescue_iseq(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *unused)
+{
+    ADD_INSN(ret, 0, putnil);
+    iseq_set_exception_local_table(iseq);
+    return Qnil;
+}
+
 static int
 defined_expr(rb_iseq_t *iseq, LINK_ANCHOR *const ret,
 	     const NODE *const node, LABEL **lfinish, VALUE needstr)
@@ -4219,13 +4286,10 @@ defined_expr(rb_iseq_t *iseq, LINK_ANCHOR *const ret,
 	LABEL *lstart = NEW_LABEL(line);
 	LABEL *lend = NEW_LABEL(line);
 	const rb_iseq_t *rescue;
-	NODE tmp_node, *node = &tmp_node;
-	rb_node_init(node, NODE_NIL, 0, 0, 0);
-	rescue = NEW_CHILD_ISEQ(node,
-				rb_str_concat(rb_str_new2
-					      ("defined guard in "),
-					      iseq->body->location.label),
-				ISEQ_TYPE_DEFINED_GUARD, 0);
+	rescue = new_child_iseq_ifunc(iseq, IFUNC_NEW(build_defined_rescue_iseq, 0, 0),
+				      rb_str_concat(rb_str_new2("defined guard in "),
+						    iseq->body->location.label),
+				      iseq, ISEQ_TYPE_RESCUE, 0);
 	lstart->rescued = LABEL_RESCUE_BEG;
 	lend->rescued = LABEL_RESCUE_END;
 	APPEND_LABEL(ret, lcur, lstart);
@@ -5064,6 +5128,7 @@ compile_next(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, in
 	add_ensure_iseq(ret, iseq, 0);
 	ADD_INSNL(ret, line, jump, ISEQ_COMPILE_DATA(iseq)->end_label);
 	ADD_ADJUST_RESTORE(ret, splabel);
+	splabel->unremovable = FALSE;
 
 	if (!popped) {
 	    ADD_INSN(ret, line, putnil);
@@ -6187,7 +6252,9 @@ iseq_compile_each0(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *node, in
 	    if (liseq->body->param.flags.has_rest) {
 		/* rest argument */
 		int idx = liseq->body->local_table_size - liseq->body->param.rest_start;
+
 		ADD_GETLOCAL(args, line, idx, lvar_level);
+		ADD_INSN1(args, line, splatarray, Qfalse);
 
 		argc = liseq->body->param.rest_start + 1;
 		flag |= VM_CALL_ARGS_SPLAT;
@@ -6587,10 +6654,10 @@ iseq_compile_each0(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *node, in
 	}
 	break;
       }
-      case NODE_SCOPE:{
+      case NODE_ONCE:{
 	int ic_index = iseq->body->is_size++;
-	const rb_iseq_t *block_iseq = NEW_CHILD_ISEQ(node, make_name_for_block(iseq),
-						     ISEQ_TYPE_ONCE_GUARD, line);
+	const rb_iseq_t *block_iseq;
+	block_iseq = NEW_CHILD_ISEQ(node->nd_body, make_name_for_block(iseq), ISEQ_TYPE_PLAIN, line);
 
 	ADD_INSN2(ret, line, once, block_iseq, INT2FIX(ic_index));
 
@@ -6921,8 +6988,9 @@ iseq_compile_each0(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *node, in
 	 *   ONCE{ rb_mRubyVMFrozenCore::core#set_postexe{ ... } }
 	 */
 	int is_index = iseq->body->is_size++;
-	const rb_iseq_t *once_iseq = NEW_CHILD_ISEQ((const NODE *)IFUNC_NEW(build_postexe_iseq, node->nd_body, 0),
-						    make_name_for_block(iseq), ISEQ_TYPE_BLOCK, line);
+	const rb_iseq_t *once_iseq =
+	    new_child_iseq_ifunc(iseq, IFUNC_NEW(build_postexe_iseq, node->nd_body, 0),
+				 rb_fstring(make_name_for_block(iseq)), iseq, ISEQ_TYPE_BLOCK, line);
 
 	ADD_INSN2(ret, line, once, once_iseq, INT2FIX(is_index));
 
@@ -7055,26 +7123,6 @@ iseq_compile_each0(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *node, in
 	if (lskip) ADD_LABEL(ret, lskip);
 	ADD_INSN(ret, line, pop);
 
-	break;
-      }
-      case NODE_PRELUDE:{
-	const rb_compile_option_t *orig_opt = ISEQ_COMPILE_DATA(iseq)->option;
-	rb_compile_option_t new_opt = *orig_opt;
-	if (node->nd_compile_option) {
-	    rb_iseq_make_compile_option(&new_opt, node->nd_compile_option);
-	    ISEQ_COMPILE_DATA(iseq)->option = &new_opt;
-	}
-	if (!new_opt.coverage_enabled) ISEQ_COVERAGE_SET(iseq, Qfalse);
-	CHECK(COMPILE_POPPED(ret, "prelude", node->nd_head));
-	CHECK(COMPILE_(ret, "body", node->nd_body, popped));
-	ISEQ_COMPILE_DATA(iseq)->option = orig_opt;
-	/* Do NOT restore ISEQ_COVERAGE!
-	 * If ISEQ_COVERAGE is not false, finish_iseq_build function in iseq.c
-	 * will initialize the counter array of line coverage.
-	 * We keep ISEQ_COVERAGE as nil to disable this initialization.
-	 * This is not harmful assuming that NODE_PRELUDE pragma does not occur
-	 * in NODE tree except the root.
-	 */
 	break;
       }
       case NODE_LAMBDA:{
@@ -7258,7 +7306,8 @@ dump_disasm_list_with_cursor(const LINK_ELEMENT *link, const LINK_ELEMENT *curr,
 	  case ISEQ_ELEMENT_LABEL:
 	    {
 		lobj = (LABEL *)link;
-		printf(LABEL_FORMAT"%s\n", lobj->label_no, dest == lobj ? " <---" : "");
+		printf(LABEL_FORMAT" [sp: %d]%s\n", lobj->label_no, lobj->sp,
+		       dest == lobj ? " <---" : "");
 		break;
 	    }
 	  case ISEQ_ELEMENT_TRACE:
@@ -7903,9 +7952,9 @@ method_for_self(VALUE name, VALUE arg, rb_insn_func_t func,
     acc.arg = arg;
     acc.func = func;
     acc.line = caller_location(&path, &realpath);
-    return rb_iseq_new_with_opt((const NODE *)IFUNC_NEW(build, (VALUE)&acc, 0),
-				rb_sym2str(name), path, realpath,
-				INT2FIX(acc.line), 0, ISEQ_TYPE_METHOD, 0);
+    return rb_iseq_new_ifunc(IFUNC_NEW(build, (VALUE)&acc, 0),
+			     rb_sym2str(name), path, realpath,
+			     INT2FIX(acc.line), 0, ISEQ_TYPE_METHOD, 0);
 }
 
 static VALUE

@@ -555,12 +555,19 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    CALL_INFO ci = (CALL_INFO)operands[0];
 	    fprintf(f, "  {\n");
 	    fprintf(f, "    struct rb_calling_info calling;\n");
+	    fprintf(f, "    VALUE block_handler;\n");
+
 	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
 	    fprintf(f, "    calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
-	    fprintf(f, "    calling.recv = cfp->self;\n");
+	    fprintf(f, "    calling.recv = Qundef; /* should not be used */\n");
+
+	    fprintf(f, "    block_handler = VM_CF_BLOCK_HANDLER(cfp);\n");
+	    fprintf(f, "    if (block_handler == VM_BLOCK_HANDLER_NONE) {\n");
+	    fprintf(f, "      rb_vm_localjump_error(\"no block given (yield)\", Qnil, 0);\n");
+	    fprintf(f, "    }\n");
 
 	    fprint_args(f, ci->orig_argc, b->stack_size - ci->orig_argc);
-	    fprintf(f, "    stack[%d] = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE");\n", b->stack_size - ci->orig_argc, operands[0]);
+	    fprintf(f, "    stack[%d] = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE", block_handler);\n", b->stack_size - ci->orig_argc, operands[0]);
 	    fprintf(f, "    if (stack[%d] == Qundef) {\n", b->stack_size - ci->orig_argc);
 	    fprintf(f, "      VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n");
 	    fprintf(f, "      stack[%d] = vm_exec(ec);\n", b->stack_size - ci->orig_argc);

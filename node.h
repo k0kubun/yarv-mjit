@@ -150,6 +150,8 @@ enum node_type {
 #define NODE_EVSTR       NODE_EVSTR
     NODE_DREGX,
 #define NODE_DREGX       NODE_DREGX
+    NODE_ONCE,
+#define NODE_ONCE        NODE_ONCE
     NODE_ARGS,
 #define NODE_ARGS        NODE_ARGS
     NODE_ARGS_AUX,
@@ -214,8 +216,6 @@ enum node_type {
 #define NODE_DSYM        NODE_DSYM
     NODE_ATTRASGN,
 #define NODE_ATTRASGN    NODE_ATTRASGN
-    NODE_PRELUDE,
-#define NODE_PRELUDE     NODE_PRELUDE
     NODE_LAMBDA,
 #define NODE_LAMBDA      NODE_LAMBDA
     NODE_LAST
@@ -363,7 +363,7 @@ typedef struct RNode {
 
 #define NEW_NODE(t,a0,a1,a2) rb_node_newnode((t),(VALUE)(a0),(VALUE)(a1),(VALUE)(a2))
 
-#define NEW_DEFN(i,a,d,p) NEW_NODE(NODE_DEFN,0,i,NEW_SCOPE(a,d))
+#define NEW_DEFN(i,a,d) NEW_NODE(NODE_DEFN,0,i,NEW_SCOPE(a,d))
 #define NEW_DEFS(r,i,a,d) NEW_NODE(NODE_DEFS,r,i,NEW_SCOPE(a,d))
 #define NEW_SCOPE(a,b) NEW_NODE(NODE_SCOPE,local_tbl(),b,a)
 #define NEW_BLOCK(a) NEW_NODE(NODE_BLOCK,a,0,0)
@@ -456,7 +456,6 @@ typedef struct RNode {
 #define NEW_PREEXE(b) NEW_SCOPE(b)
 #define NEW_POSTEXE(b) NEW_NODE(NODE_POSTEXE,0,b,0)
 #define NEW_ATTRASGN(r,m,a) NEW_NODE(NODE_ATTRASGN,r,m,a)
-#define NEW_PRELUDE(p,b,o) NEW_NODE(NODE_PRELUDE,p,b,o)
 
 #define NODE_SPECIAL_REQUIRED_KEYWORD ((NODE *)-1)
 #define NODE_SPECIAL_NO_NAME_REST     ((NODE *)-1)
@@ -465,12 +464,15 @@ RUBY_SYMBOL_EXPORT_BEGIN
 
 typedef struct node_buffer_struct node_buffer_t;
 /* T_IMEMO/ast */
+typedef struct rb_ast_body_struct {
+    const NODE *root;
+    VALUE compile_option;
+} rb_ast_body_t;
 typedef struct rb_ast_struct {
     VALUE flags;
-    VALUE reserved1;
-    NODE *root;
     node_buffer_t *node_buffer;
     VALUE mark_ary;
+    rb_ast_body_t body;
 } rb_ast_t;
 rb_ast_t *rb_ast_new();
 void rb_ast_mark(rb_ast_t*);
@@ -486,7 +488,7 @@ VALUE rb_parser_end_seen_p(VALUE);
 VALUE rb_parser_encoding(VALUE);
 VALUE rb_parser_get_yydebug(VALUE);
 VALUE rb_parser_set_yydebug(VALUE, VALUE);
-VALUE rb_parser_dump_tree(NODE *node, int comment);
+VALUE rb_parser_dump_tree(const NODE *node, int comment);
 void rb_parser_set_options(VALUE, int, int, int, int);
 
 rb_ast_t *rb_parser_compile_cstr(VALUE, const char*, const char*, int, int);

@@ -17,6 +17,7 @@
 # include <dlfcn.h>
 #endif
 
+#define RUBY_VM_INSNS_INFO 1
 /* #define RUBY_MARK_FREE_DEBUG 1 */
 #include "gc.h"
 #include "vm_core.h"
@@ -477,24 +478,24 @@ make_compile_option_value(rb_compile_option_t *option)
 }
 
 rb_iseq_t *
-rb_iseq_new(const NODE *node, VALUE name, VALUE path, VALUE realpath,
+rb_iseq_new(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE realpath,
 	    const rb_iseq_t *parent, enum iseq_type type)
 {
-    return rb_iseq_new_with_opt(node, name, path, realpath, INT2FIX(0), parent, type,
+    return rb_iseq_new_with_opt(ast, name, path, realpath, INT2FIX(0), parent, type,
 				&COMPILE_OPTION_DEFAULT);
 }
 
 rb_iseq_t *
-rb_iseq_new_top(const NODE *node, VALUE name, VALUE path, VALUE realpath, const rb_iseq_t *parent)
+rb_iseq_new_top(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE realpath, const rb_iseq_t *parent)
 {
-    return rb_iseq_new_with_opt(node, name, path, realpath, INT2FIX(0), parent, ISEQ_TYPE_TOP,
+    return rb_iseq_new_with_opt(ast, name, path, realpath, INT2FIX(0), parent, ISEQ_TYPE_TOP,
 				&COMPILE_OPTION_DEFAULT);
 }
 
 rb_iseq_t *
-rb_iseq_new_main(const NODE *node, VALUE path, VALUE realpath, const rb_iseq_t *parent)
+rb_iseq_new_main(const rb_ast_body_t *ast, VALUE path, VALUE realpath, const rb_iseq_t *parent)
 {
-    return rb_iseq_new_with_opt(node, rb_fstring_cstr("<main>"),
+    return rb_iseq_new_with_opt(ast, rb_fstring_cstr("<main>"),
 				path, realpath, INT2FIX(0),
 				parent, ISEQ_TYPE_MAIN, &COMPILE_OPTION_DEFAULT);
 }
@@ -514,17 +515,38 @@ iseq_translate(rb_iseq_t *iseq)
 }
 
 rb_iseq_t *
-rb_iseq_new_with_opt(const NODE *node, VALUE name, VALUE path, VALUE realpath,
+rb_iseq_new_with_opt(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE realpath,
 		     VALUE first_lineno, const rb_iseq_t *parent,
 		     enum iseq_type type, const rb_compile_option_t *option)
+{
+    const NODE *node = ast ? ast->root : 0;
+    /* TODO: argument check */
+    rb_iseq_t *iseq = iseq_alloc();
+    rb_compile_option_t new_opt;
+
+    new_opt = option ? *option : COMPILE_OPTION_DEFAULT;
+    if (ast && ast->compile_option) rb_iseq_make_compile_option(&new_opt, ast->compile_option);
+
+    prepare_iseq_build(iseq, name, path, realpath, first_lineno, node ? &node->nd_loc : NULL, parent, type, &new_opt);
+
+    rb_iseq_compile_node(iseq, node);
+    finish_iseq_build(iseq);
+
+    return iseq_translate(iseq);
+}
+
+rb_iseq_t *
+rb_iseq_new_ifunc(const struct vm_ifunc *ifunc, VALUE name, VALUE path, VALUE realpath,
+		       VALUE first_lineno, const rb_iseq_t *parent,
+		       enum iseq_type type, const rb_compile_option_t *option)
 {
     /* TODO: argument check */
     rb_iseq_t *iseq = iseq_alloc();
 
     if (!option) option = &COMPILE_OPTION_DEFAULT;
-    prepare_iseq_build(iseq, name, path, realpath, first_lineno, node ? &node->nd_loc : NULL, parent, type, option);
+    prepare_iseq_build(iseq, name, path, realpath, first_lineno, NULL, parent, type, option);
 
-    rb_iseq_compile_node(iseq, node);
+    rb_iseq_compile_ifunc(iseq, ifunc);
     finish_iseq_build(iseq);
 
     return iseq_translate(iseq);
@@ -559,7 +581,7 @@ iseq_type_from_sym(VALUE type)
     const ID id_ensure = rb_intern("ensure");
     const ID id_eval = rb_intern("eval");
     const ID id_main = rb_intern("main");
-    const ID id_defined_guard = rb_intern("defined_guard");
+    const ID id_plain = rb_intern("plain");
     /* ensure all symbols are static or pinned down before
      * conversion */
     const ID typeid = rb_check_id(&type);
@@ -571,7 +593,7 @@ iseq_type_from_sym(VALUE type)
     if (typeid == id_ensure) return ISEQ_TYPE_ENSURE;
     if (typeid == id_eval) return ISEQ_TYPE_EVAL;
     if (typeid == id_main) return ISEQ_TYPE_MAIN;
-    if (typeid == id_defined_guard) return ISEQ_TYPE_DEFINED_GUARD;
+    if (typeid == id_plain) return ISEQ_TYPE_PLAIN;
     return (enum iseq_type)-1;
 }
 
@@ -692,7 +714,7 @@ rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE realpath, VALUE line, c
 	ast = (*parse)(parser, file, src, ln);
     }
 
-    if (!ast->root) {
+    if (!ast->body.root) {
 	rb_ast_dispose(ast);
 	rb_exc_raise(GET_EC()->errinfo);
     }
@@ -700,7 +722,7 @@ rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE realpath, VALUE line, c
 	INITIALIZED VALUE label = parent ?
 	    parent->body->location.label :
 	    rb_fstring_cstr("<compiled>");
-	iseq = rb_iseq_new_with_opt(ast->root, label, file, realpath, line,
+	iseq = rb_iseq_new_with_opt(&ast->body, label, file, realpath, line,
 				    parent, type, &option);
 	rb_ast_dispose(ast);
     }
@@ -911,17 +933,17 @@ iseqw_s_compile_file(int argc, VALUE *argv, VALUE self)
     parser = rb_parser_new();
     rb_parser_set_context(parser, NULL, FALSE);
     ast = rb_parser_compile_file_path(parser, file, f, NUM2INT(line));
-    if (!ast->root) exc = GET_EC()->errinfo;
+    if (!ast->body.root) exc = GET_EC()->errinfo;
 
     rb_io_close(f);
-    if (!ast->root) {
+    if (!ast->body.root) {
 	rb_ast_dispose(ast);
 	rb_exc_raise(exc);
     }
 
     make_compile_option(&option, opt);
 
-    ret = iseqw_new(rb_iseq_new_with_opt(ast->root, rb_fstring_cstr("<main>"),
+    ret = iseqw_new(rb_iseq_new_with_opt(&ast->body, rb_fstring_cstr("<main>"),
 					 file,
 					 rb_realpath_internal(Qnil, file, 1),
 					 line, NULL, ISEQ_TYPE_TOP, &option));
@@ -1224,7 +1246,7 @@ static VALUE iseq_data_to_ary(const rb_iseq_t *iseq);
  *    The type of the instruction sequence.
  *
  *    Valid values are +:top+, +:method+, +:block+, +:class+, +:rescue+,
- *    +:ensure+, +:eval+, +:main+, and +:defined_guard+.
+ *    +:ensure+, +:eval+, +:main+, and +plain+.
  *
  *  [locals]
  *    An array containing the names of all arguments and local variables as
@@ -2129,7 +2151,7 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
     DECL_SYMBOL(ensure);
     DECL_SYMBOL(eval);
     DECL_SYMBOL(main);
-    DECL_SYMBOL(defined_guard);
+    DECL_SYMBOL(plain);
 
     if (sym_top == 0) {
 	int i;
@@ -2144,7 +2166,7 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
 	INIT_SYMBOL(ensure);
 	INIT_SYMBOL(eval);
 	INIT_SYMBOL(main);
-	INIT_SYMBOL(defined_guard);
+	INIT_SYMBOL(plain);
     }
 
     /* type */
@@ -2157,7 +2179,7 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
       case ISEQ_TYPE_ENSURE: type = sym_ensure; break;
       case ISEQ_TYPE_EVAL:   type = sym_eval;   break;
       case ISEQ_TYPE_MAIN:   type = sym_main;   break;
-      case ISEQ_TYPE_DEFINED_GUARD: type = sym_defined_guard; break;
+      case ISEQ_TYPE_PLAIN:  type = sym_plain;  break;
       default: rb_bug("unsupported iseq type");
     };
 

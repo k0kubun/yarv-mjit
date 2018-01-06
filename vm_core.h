@@ -302,7 +302,7 @@ struct rb_iseq_constant_body {
 	ISEQ_TYPE_ENSURE,
 	ISEQ_TYPE_EVAL,
 	ISEQ_TYPE_MAIN,
-	ISEQ_TYPE_DEFINED_GUARD
+	ISEQ_TYPE_PLAIN
     } type;              /* instruction sequence type */
 
     unsigned int iseq_size;
@@ -893,11 +893,13 @@ typedef enum {
 RUBY_SYMBOL_EXPORT_BEGIN
 
 /* node -> iseq */
-rb_iseq_t *rb_iseq_new         (const NODE *node, VALUE name, VALUE path, VALUE realpath, const rb_iseq_t *parent, enum iseq_type);
-rb_iseq_t *rb_iseq_new_top     (const NODE *node, VALUE name, VALUE path, VALUE realpath, const rb_iseq_t *parent);
-rb_iseq_t *rb_iseq_new_main    (const NODE *node,             VALUE path, VALUE realpath, const rb_iseq_t *parent);
-rb_iseq_t *rb_iseq_new_with_opt(const NODE *node, VALUE name, VALUE path, VALUE realpath, VALUE first_lineno,
+rb_iseq_t *rb_iseq_new         (const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE realpath, const rb_iseq_t *parent, enum iseq_type);
+rb_iseq_t *rb_iseq_new_top     (const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE realpath, const rb_iseq_t *parent);
+rb_iseq_t *rb_iseq_new_main    (const rb_ast_body_t *ast,             VALUE path, VALUE realpath, const rb_iseq_t *parent);
+rb_iseq_t *rb_iseq_new_with_opt(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE realpath, VALUE first_lineno,
 				const rb_iseq_t *parent, enum iseq_type, const rb_compile_option_t*);
+rb_iseq_t *rb_iseq_new_ifunc(const struct vm_ifunc *ifunc, VALUE name, VALUE path, VALUE realpath, VALUE first_lineno,
+			     const rb_iseq_t *parent, enum iseq_type, const rb_compile_option_t*);
 
 /* src -> iseq */
 rb_iseq_t *rb_iseq_compile(VALUE src, VALUE file, VALUE line);
@@ -1415,7 +1417,6 @@ vm_proc_ep(VALUE procval)
 static inline const rb_iseq_t *
 vm_block_iseq(const struct rb_block *block)
 {
-    if (!block) return NULL;
     switch (vm_block_type(block)) {
       case block_type_iseq: return rb_iseq_check(block->as.captured.code.iseq);
       case block_type_proc: return vm_proc_iseq(block->as.proc);
