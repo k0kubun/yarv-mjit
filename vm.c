@@ -1280,7 +1280,7 @@ rb_sourceline(void)
     }
 }
 
-VALUE
+MJIT_FUNC_EXPORTED VALUE
 rb_source_location(int *pline)
 {
     const rb_execution_context_t *ec = GET_EC();
