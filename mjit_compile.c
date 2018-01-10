@@ -77,16 +77,10 @@ static int
 compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, int with_block)
 {
     CALL_INFO ci = (CALL_INFO)operands[0];
-    CALL_CACHE cc = (CALL_CACHE)operands[1];
     unsigned int argc = ci->orig_argc; /* unlike `ci->orig_argc`, `argc` may include blockarg */
     if (with_block) {
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
     }
-
-    fprintf(f, "  if (UNLIKELY(mjit_check_invalid_cc(stack[%d], ((CALL_CACHE)0x%"PRIxVALUE")->method_state, ((CALL_CACHE)0x%"PRIxVALUE")->class_serial))) {\n", stack_size - 1 - argc, (VALUE)cc, (VALUE)cc);
-    fprintf(f, "    cfp->pc -= %d;\n", insn_len(insn));
-    fprintf(f, "    return Qundef; /* cancel JIT */\n");
-    fprintf(f, "  }\n");
 
     fprintf(f, "  {\n");
     fprintf(f, "    struct rb_calling_info calling;\n");
@@ -98,6 +92,7 @@ compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, 
     }
     fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
     fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
+    fprintf(f, "    vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", operands[0], operands[1]);
     fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
     fprintf(f, "  }\n");
     return -argc;
@@ -116,13 +111,27 @@ fprint_opt_call_variables(FILE *f, int insn, unsigned int stack_size, unsigned i
 }
 
 static void
-fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int stack_size, unsigned int argc, VALUE key)
+fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int result_pos, unsigned int argc, VALUE key)
 {
     fprintf(f, "    if (result == Qundef) {\n");
-    fprintf(f, "      cfp->pc -= %d;\n", insn_len(insn));
-    fprintf(f, "      return Qundef; /* cancel JIT */\n");
+    fprintf(f, "      struct rb_calling_info calling;\n");
+    if (key) {
+	if (argc == 3) { /* for opt_aset_with, move the position of `val` and put the key */
+	    fprintf(f, "      *(cfp->sp) = *(cfp->sp - 1);\n");
+	    fprintf(f, "      *(cfp->sp - 1) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
+	    fprintf(f, "      cfp->sp++;\n");
+	} else { /* for opt_aref_with, just put the key */
+	    fprintf(f, "      *(cfp->sp++) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
+	}
+    }
+    /* CALL_SIMPLE_METHOD */
+    fprintf(f, "      calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
+    fprintf(f, "      calling.argc = %d;\n", argc - 1); /* -1 is recv */
+    fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = recv);\n", ci, cc);
+    fprint_call_method(f, ci, cc, result_pos);
+    fprintf(f, "    } else {\n");
+    fprintf(f, "      stack[%d] = result;\n", result_pos);
     fprintf(f, "    }\n");
-    fprintf(f, "    stack[%d] = result;\n", stack_size - argc);
 }
 
 /* Print optimized call with redefinition fallback and return stack size change.
@@ -141,7 +150,7 @@ fprint_opt_call(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int stack_size, 
     va_end(va);
     fprintf(f, ";\n");
 
-    fprint_opt_call_fallback(f, insn, ci, cc, stack_size, argc, (VALUE)0);
+    fprint_opt_call_fallback(f, insn, ci, cc, stack_size - argc, argc, (VALUE)0);
     fprintf(f, "  }\n");
 
     return 1 - argc;
@@ -154,7 +163,7 @@ fprint_opt_call_with_key(FILE *f, int insn, VALUE ci, VALUE cc, VALUE key, unsig
     va_list va;
 
     fprintf(f, "  {\n");
-    fprint_opt_call_variables(f, insn, stack_size, argc);
+    fprint_opt_call_variables(f, insn, stack_size, argc - 1); /* `-1` for key */
 
     fprintf(f, "    VALUE result = ");
     va_start(va, format);
@@ -162,10 +171,10 @@ fprint_opt_call_with_key(FILE *f, int insn, VALUE ci, VALUE cc, VALUE key, unsig
     va_end(va);
     fprintf(f, ";\n");
 
-    fprint_opt_call_fallback(f, insn, ci, cc, stack_size, argc, key);
+    fprint_opt_call_fallback(f, insn, ci, cc, stack_size - argc + 1, argc, key); /* `+ 1` for key */
     fprintf(f, "  }\n");
 
-    return 1 - argc;
+    return 2 - argc; /* recv + key = 2 */
 }
 
 struct case_dispatch_var {
@@ -650,11 +659,11 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 3, "vm_opt_aset(recv, obj, obj2)");
 	break;
       case BIN(opt_aset_with):
-	b->stack_size += fprint_opt_call_with_key(f, insn, operands[0], operands[1], operands[2], b->stack_size, 2,
+	b->stack_size += fprint_opt_call_with_key(f, insn, operands[0], operands[1], operands[2], b->stack_size, 3,
 		"vm_opt_aset_with(recv, 0x%"PRIxVALUE", obj)", operands[2]);
 	break;
       case BIN(opt_aref_with):
-	b->stack_size += fprint_opt_call_with_key(f, insn, operands[0], operands[1], operands[2], b->stack_size, 1,
+	b->stack_size += fprint_opt_call_with_key(f, insn, operands[0], operands[1], operands[2], b->stack_size, 2,
 		"vm_opt_aref_with(recv, 0x%"PRIxVALUE")", operands[2]);
 	break;
       case BIN(opt_length):
