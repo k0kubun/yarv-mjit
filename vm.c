@@ -14,6 +14,7 @@
 
 #include "gc.h"
 #include "vm_core.h"
+#include "vm_debug.h"
 #include "iseq.h"
 #include "eval_intern.h"
 #include "probes.h"
@@ -294,6 +295,8 @@ static void vm_collect_usage_register(int reg, int isset);
 static VALUE vm_make_env_object(const rb_execution_context_t *ec, rb_control_frame_t *cfp);
 extern VALUE vm_invoke_bmethod(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
 static VALUE vm_invoke_proc(rb_execution_context_t *ec, rb_proc_t *proc, VALUE self, int argc, const VALUE *argv, VALUE block_handler);
+
+static VALUE rb_block_param_proxy;
 
 #include "mjit.h"
 #include "vm_insnhelper.h"
@@ -1503,7 +1506,20 @@ vm_redefinition_check_flag(VALUE klass)
     if (klass == rb_cNilClass) return NIL_REDEFINED_OP_FLAG;
     if (klass == rb_cTrueClass) return TRUE_REDEFINED_OP_FLAG;
     if (klass == rb_cFalseClass) return FALSE_REDEFINED_OP_FLAG;
+    if (klass == rb_cProc) return PROC_REDEFINED_OP_FLAG;
     return 0;
+}
+
+static int
+vm_redefinition_check_method_type(const rb_method_definition_t *def)
+{
+    switch (def->type) {
+      case VM_METHOD_TYPE_CFUNC:
+      case VM_METHOD_TYPE_OPTIMIZED:
+	return TRUE;
+      default:
+	return FALSE;
+    }
 }
 
 static void
@@ -1513,7 +1529,7 @@ rb_vm_check_redefinition_opt_method(const rb_method_entry_t *me, VALUE klass)
     if (RB_TYPE_P(klass, T_ICLASS) && FL_TEST(klass, RICLASS_IS_ORIGIN)) {
        klass = RBASIC_CLASS(klass);
     }
-    if (me->def->type == VM_METHOD_TYPE_CFUNC) {
+    if (vm_redefinition_check_method_type(me->def)) {
 	if (st_lookup(vm_opt_method_table, (st_data_t)me, &bop)) {
 	    int flag = vm_redefinition_check_flag(klass);
 
@@ -1546,7 +1562,7 @@ add_opt_method(VALUE klass, ID mid, VALUE bop)
 {
     const rb_method_entry_t *me = rb_method_entry_at(klass, mid);
 
-    if (me && me->def->type == VM_METHOD_TYPE_CFUNC) {
+    if (me && vm_redefinition_check_method_type(me->def)) {
 	st_insert(vm_opt_method_table, (st_data_t)me, (st_data_t)bop);
     }
     else {
@@ -1588,6 +1604,7 @@ vm_init_redefined_flag(void)
     OP(UMinus, UMINUS), (C(String));
     OP(Max, MAX), (C(Array));
     OP(Min, MIN), (C(Array));
+    OP(Call, CALL), (C(Proc));
 #undef C
 #undef OP
 }
@@ -2350,13 +2367,18 @@ rb_execution_context_mark(const rb_execution_context_t *ec)
 	rb_gc_mark_values((long)(sp - p), p);
 
 	while (cfp != limit_cfp) {
-#if VM_CHECK_MODE > 0
 	    const VALUE *ep = cfp->ep;
 	    VM_ASSERT(!!VM_ENV_FLAGS(ep, VM_ENV_FLAG_ESCAPED) == vm_ep_in_heap_p_(ec, ep));
-#endif
 	    rb_gc_mark(cfp->self);
 	    rb_gc_mark((VALUE)cfp->iseq);
 	    rb_gc_mark((VALUE)cfp->block_code);
+
+	    if (!VM_ENV_LOCAL_P(ep)) {
+		const VALUE *prev_ep = VM_ENV_PREV_EP(ep);
+		if (VM_ENV_FLAGS(prev_ep, VM_ENV_FLAG_ESCAPED)) {
+		    rb_gc_mark(prev_ep[VM_ENV_DATA_INDEX_ENV]);
+		}
+	    }
 
 	    cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 	}
@@ -3065,6 +3087,12 @@ Init_VM(void)
 	rb_define_global_const("TOPLEVEL_BINDING", rb_binding_new());
     }
     vm_init_redefined_flag();
+
+    rb_block_param_proxy = rb_obj_alloc(rb_cObject);
+    rb_add_method(rb_singleton_class(rb_block_param_proxy), idCall, VM_METHOD_TYPE_OPTIMIZED,
+		  (void *)OPTIMIZED_METHOD_TYPE_BLOCK_CALL, METHOD_VISI_PUBLIC);
+    rb_obj_freeze(rb_block_param_proxy);
+    rb_gc_register_mark_object(rb_block_param_proxy);
 
     /* vm_backtrace.c */
     Init_vm_backtrace();

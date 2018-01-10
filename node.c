@@ -22,10 +22,12 @@
 #define A_INT(val) rb_str_catf(buf, "%d", (val))
 #define A_LONG(val) rb_str_catf(buf, "%ld", (val))
 #define A_LIT(lit) AR(rb_inspect(lit))
-#define A_OPERATOR(id) add_operator(buf, (id))
 #define A_NODE_HEADER(node, term) \
-    rb_str_catf(buf, "@ %s (line: %d, code_range: (%d,%d)-(%d,%d))"term, \
-	ruby_node_name(nd_type(node)), nd_line(node), nd_first_lineno(node), nd_first_column(node), nd_last_lineno(node), nd_last_column(node))
+    rb_str_catf(buf, "@ %s (line: %d, location: (%d,%d)-(%d,%d))%s"term, \
+		ruby_node_name(nd_type(node)), nd_line(node), \
+		nd_first_lineno(node), nd_first_column(node), \
+		nd_last_lineno(node), nd_last_column(node), \
+		(node->flags & NODE_FL_NEWLINE ? "*" : ""))
 #define A_FIELD_HEADER(len, name, term) \
     rb_str_catf(buf, "+- %.*s:"term, (len), (name))
 #define D_FIELD_HEADER(len, name, term) (A_INDENT, A_FIELD_HEADER(len, name, term))
@@ -60,7 +62,6 @@
 #define F_INT(name, ann)	    SIMPLE_FIELD1(#name, ann) A_INT(node->name)
 #define F_LONG(name, ann)	    SIMPLE_FIELD1(#name, ann) A_LONG(node->name)
 #define F_LIT(name, ann)	    SIMPLE_FIELD1(#name, ann) A_LIT(node->name)
-#define F_OPERATOR(name, ann)	    SIMPLE_FIELD1(#name, ann) A_OPERATOR(node->name)
 #define F_MSG(name, ann, desc)	    SIMPLE_FIELD1(#name, ann) A(desc)
 
 #define F_NODE(name, ann) \
@@ -93,16 +94,6 @@ add_id(VALUE buf, ID id)
 	else {
 	    A("(internal variable)");
 	}
-    }
-}
-
-static void
-add_operator(VALUE buf, ID id)
-{
-    switch (id) {
-	case 0: A("0 (||)"); break;
-	case 1: A("1 (&&)"); break;
-	default: A_ID(id);
     }
 }
 
@@ -378,8 +369,13 @@ dump_node(VALUE buf, VALUE indent, int comment, const NODE * node)
 	ANN("format: [nd_vid](current dvar) = [nd_value]");
 	ANN("example: 1.times { x = foo }");
 	F_ID(nd_vid, "local variable");
-	LAST_NODE;
-	F_NODE(nd_value, "rvalue");
+	if (node->nd_value == NODE_SPECIAL_REQUIRED_KEYWORD) {
+	    F_MSG(nd_value, "rvalue", "NODE_SPECIAL_REQUIRED_KEYWORD (required keyword argument)");
+	}
+	else {
+	    LAST_NODE;
+	    F_NODE(nd_value, "rvalue");
+	}
 	return;
       case NODE_IASGN:
 	ANN("instance variable assignment");
@@ -427,7 +423,7 @@ dump_node(VALUE buf, VALUE indent, int comment, const NODE * node)
 	ANN("format: [nd_value] [ [nd_args->nd_body] ] [nd_vid]= [nd_args->nd_head]");
 	ANN("example: ary[1] += foo");
 	F_NODE(nd_recv, "receiver");
-	F_OPERATOR(nd_mid, "operator");
+	F_ID(nd_mid, "operator");
 	F_NODE(nd_args->nd_head, "index");
 	LAST_NODE;
 	F_NODE(nd_args->nd_body, "rvalue");
@@ -443,7 +439,7 @@ dump_node(VALUE buf, VALUE indent, int comment, const NODE * node)
 	    if (node->nd_next->nd_aid) A("? ");
 	    A_ID(node->nd_next->nd_vid);
 	}
-	F_OPERATOR(nd_next->nd_mid, "operator");
+	F_ID(nd_next->nd_mid, "operator");
 	LAST_NODE;
 	F_NODE(nd_value, "rvalue");
 	return;
@@ -468,7 +464,7 @@ dump_node(VALUE buf, VALUE indent, int comment, const NODE * node)
 	ANN("format: [nd_head](constant) [nd_aid]= [nd_value]");
 	ANN("example: A::B ||= 1");
 	F_NODE(nd_head, "constant");
-	F_OPERATOR(nd_aid, "operator");
+	F_ID(nd_aid, "operator");
 	LAST_NODE;
 	F_NODE(nd_value, "rvalue");
 	return;
@@ -1030,10 +1026,10 @@ rb_node_init(NODE *n, enum node_type type, VALUE a0, VALUE a1, VALUE a2)
     n->u1.value = a0;
     n->u2.value = a1;
     n->u3.value = a2;
-    n->nd_loc.first_loc.lineno = 0;
-    n->nd_loc.first_loc.column = 0;
-    n->nd_loc.last_loc.lineno = 0;
-    n->nd_loc.last_loc.column = 0;
+    n->nd_loc.beg_pos.lineno = 0;
+    n->nd_loc.beg_pos.column = 0;
+    n->nd_loc.end_pos.lineno = 0;
+    n->nd_loc.end_pos.column = 0;
 }
 
 typedef struct node_buffer_elem_struct {
@@ -1127,15 +1123,4 @@ void
 rb_ast_add_mark_object(rb_ast_t *ast, VALUE obj)
 {
     rb_ary_push(ast->mark_ary, obj);
-}
-
-void
-rb_ast_delete_mark_object(rb_ast_t *ast, VALUE obj)
-{
-    long i;
-    for (i = 0; i < RARRAY_LEN(ast->mark_ary); i++) {
-	if (obj == RARRAY_AREF(ast->mark_ary, i)) {
-	    RARRAY_ASET(ast->mark_ary, i, Qnil);
-	}
-    }
 }

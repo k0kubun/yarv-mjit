@@ -3,26 +3,20 @@
  * included by eval.c
  */
 
+#define write_warn(str, x) \
+    (NIL_P(str) ? warn_print(x) : (void)rb_str_cat_cstr(str, x))
+#define write_warn2(str, x, l) \
+    (NIL_P(str) ? warn_print2(x, l) : (void)rb_str_cat(str, x, l))
 #ifdef HAVE_BUILTIN___BUILTIN_CONSTANT_P
-#define write_warn(str, x) RB_GNUC_EXTENSION_BLOCK( \
-        NIL_P(str) ? \
-            warn_print(x) : (void)( \
-            (__builtin_constant_p(x)) ? 		\
-                rb_str_concat((str), rb_str_new((x), (long)strlen(x))) : \
-                rb_str_concat((str), rb_str_new2(x)) \
-            ) \
-        )
 #define warn_print(x) RB_GNUC_EXTENSION_BLOCK(	\
     (__builtin_constant_p(x)) ? 		\
 	rb_write_error2((x), (long)strlen(x)) : \
 	rb_write_error(x)			\
 )
 #else
-#define write_warn(str, x) NIL_P(str) ? rb_write_error((x)) : (void)rb_str_concat((str), rb_str_new2(x))
 #define warn_print(x) rb_write_error(x)
 #endif
 
-#define write_warn2(str,x,l) NIL_P(str) ? warn_print2(x,l) : (void)rb_str_concat((str), rb_str_new((x),(l)))
 #define warn_print2(x,l) rb_write_error2((x),(l))
 
 #define write_warn_str(str,x) NIL_P(str) ? rb_write_error_str(x) : (void)rb_str_concat((str), (x))
@@ -86,7 +80,7 @@ error_print(rb_execution_context_t *ec)
 }
 
 static void
-print_errinfo(const VALUE eclass, const VALUE errat, const VALUE emesg, const VALUE str, int colored)
+print_errinfo(const VALUE eclass, const VALUE errat, const VALUE emesg, const VALUE str, int highlight)
 {
     static const char underline[] = "\033[4;1m";
     static const char bold[] = "\033[1m";
@@ -105,7 +99,7 @@ print_errinfo(const VALUE eclass, const VALUE errat, const VALUE emesg, const VA
 	    write_warn(str, ": ");
 	}
 
-        if (colored) write_warn(str, bold);
+	if (highlight) write_warn(str, bold);
 
 	if (!NIL_P(emesg)) {
 	    einfo = RSTRING_PTR(emesg);
@@ -114,44 +108,61 @@ print_errinfo(const VALUE eclass, const VALUE errat, const VALUE emesg, const VA
     }
 
     if (eclass == rb_eRuntimeError && elen == 0) {
-        if (colored) write_warn(str, underline);
-	write_warn(str, "unhandled exception\n");
+	if (highlight) write_warn(str, underline);
+	write_warn(str, "unhandled exception");
+	if (highlight) write_warn(str, reset);
+	write_warn2(str, "\n", 1);
     }
     else {
 	VALUE epath;
 
 	epath = rb_class_name(eclass);
 	if (elen == 0) {
-            if (colored) write_warn(str, underline);
+	    if (highlight) write_warn(str, underline);
 	    write_warn_str(str, epath);
+	    if (highlight) write_warn(str, reset);
 	    write_warn(str, "\n");
 	}
 	else {
 	    const char *tail = 0;
 	    long len = elen;
 
+	    if (emesg == Qundef && highlight) write_warn(str, bold);
 	    if (RSTRING_PTR(epath)[0] == '#')
 		epath = 0;
 	    if ((tail = memchr(einfo, '\n', elen)) != 0) {
 		len = tail - einfo;
 		tail++;		/* skip newline */
+		write_warn2(str, einfo, len);
 	    }
-	    write_warn_str(str, tail ? rb_str_subseq(emesg, 0, len) : emesg);
+	    else {
+		write_warn_str(str, emesg);
+	    }
 	    if (epath) {
 		write_warn(str, " (");
-                if (colored) write_warn(str, underline);
+		if (highlight) write_warn(str, underline);
                 write_warn_str(str, epath);
-                if (colored) write_warn(str, reset);
-                if (colored) write_warn(str, bold);
-		write_warn(str, ")\n");
+		if (highlight) {
+		    write_warn(str, reset);
+		    write_warn(str, bold);
+		}
+		write_warn2(str, ")", 1);
+		if (highlight) write_warn(str, reset);
+		write_warn2(str, "\n", 1);
 	    }
 	    if (tail) {
-		write_warn_str(str, rb_str_subseq(emesg, tail - einfo, elen - len - 1));
+		if (highlight) {
+		    if (einfo[elen-1] == '\n') --elen;
+		    write_warn(str, bold);
+		}
+		write_warn2(str, tail, elen - len - 1);
 	    }
-	    if (tail ? einfo[elen-1] != '\n' : !epath) write_warn2(str, "\n", 1);
+	    if (tail ? (highlight || einfo[elen-1] != '\n') : !epath) {
+		if (highlight) write_warn(str, reset);
+		write_warn2(str, "\n", 1);
+	    }
 	}
     }
-    if (colored) write_warn(str, reset);
 }
 
 static void

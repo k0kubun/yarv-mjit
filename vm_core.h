@@ -60,14 +60,16 @@
  * implementation selector of get_insn_info algorithm
  *   0: linear search
  *   1: binary search
+ *   2: succinct bitvector
  */
-#define VM_INSN_INFO_TABLE_IMPL 1
+#ifndef VM_INSN_INFO_TABLE_IMPL
+# define VM_INSN_INFO_TABLE_IMPL 2
+#endif
 
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 
 #include "node.h"
-#include "vm_debug.h"
 #include "vm_opts.h"
 #include "id.h"
 #include "method.h"
@@ -137,6 +139,7 @@
 #endif /* OPT_CALL_THREADED_CODE */
 
 typedef unsigned long rb_num_t;
+typedef   signed long rb_snum_t;
 
 enum ruby_tag_type {
     RUBY_TAG_NONE	= 0x0,
@@ -259,7 +262,7 @@ typedef struct rb_iseq_location_struct {
     VALUE base_label;   /* String */
     VALUE label;        /* String */
     VALUE first_lineno; /* TODO: may be unsigned short */
-    rb_code_range_t code_range;
+    rb_code_location_t code_location;
 } rb_iseq_location_t;
 
 #define PATHOBJ_PATH     0
@@ -383,8 +386,11 @@ struct rb_iseq_constant_body {
     /* insn info, must be freed */
     struct iseq_insn_info {
 	const struct iseq_insn_info_entry *body;
-	const unsigned int *positions;
+	unsigned int *positions;
 	unsigned int size;
+#if VM_INSN_INFO_TABLE_IMPL == 2
+	struct succ_index_table *succ_index_table;
+#endif
     } insns_info;
 
     const ID *local_table;		/* must free */
@@ -491,6 +497,7 @@ enum ruby_basic_operators {
     BOP_UMINUS,
     BOP_MAX,
     BOP_MIN,
+    BOP_CALL,
 
     BOP_LAST_
 };
@@ -627,6 +634,7 @@ typedef struct rb_vm_struct {
 #define NIL_REDEFINED_OP_FLAG    (1 << 9)
 #define TRUE_REDEFINED_OP_FLAG   (1 << 10)
 #define FALSE_REDEFINED_OP_FLAG  (1 << 11)
+#define PROC_REDEFINED_OP_FLAG   (1 << 12)
 
 #define BASIC_OP_UNREDEFINED_P(op, klass) (LIKELY((GET_VM()->redefined_flag[(op)]&(klass)) == 0))
 
@@ -959,7 +967,6 @@ enum vm_check_match_type {
 enum vm_call_flag_bits {
     VM_CALL_ARGS_SPLAT_bit,     /* m(*args) */
     VM_CALL_ARGS_BLOCKARG_bit,  /* m(&block) */
-    VM_CALL_ARGS_BLOCKARG_BLOCKPARAM_bit,  /* m(&block) and block is a passed block parameter */
     VM_CALL_FCALL_bit,          /* m(...) */
     VM_CALL_VCALL_bit,          /* m */
     VM_CALL_ARGS_SIMPLE_bit,    /* (ci->flag & (SPLAT|BLOCKARG)) && blockiseq == NULL && ci->kw_arg == NULL */
@@ -974,7 +981,6 @@ enum vm_call_flag_bits {
 
 #define VM_CALL_ARGS_SPLAT      (0x01 << VM_CALL_ARGS_SPLAT_bit)
 #define VM_CALL_ARGS_BLOCKARG   (0x01 << VM_CALL_ARGS_BLOCKARG_bit)
-#define VM_CALL_ARGS_BLOCKARG_BLOCKPARAM (0x01 << VM_CALL_ARGS_BLOCKARG_BLOCKPARAM_bit)
 #define VM_CALL_FCALL           (0x01 << VM_CALL_FCALL_bit)
 #define VM_CALL_VCALL           (0x01 << VM_CALL_VCALL_bit)
 #define VM_CALL_ARGS_SIMPLE     (0x01 << VM_CALL_ARGS_SIMPLE_bit)

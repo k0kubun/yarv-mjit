@@ -209,7 +209,7 @@ with all sufficient information, see the ChangeLog file or Redmine
 
 * Time
 
-  * Time#at receives 3rd argument which specifies the unit of 2nd argument.
+  * Time.at receives 3rd argument which specifies the unit of 2nd argument.
     [Feature #13919]
 
 * KeyError
@@ -553,14 +553,14 @@ with all sufficient information, see the ChangeLog file or Redmine
 * Dynamic instrumentation for TracePoint hooks instead of using "trace"
   instruction to avoid overhead [Feature #14104]
 
-* ERB now generates code from a template which runs 2 times faster than Ruby 2.4
+* ERB now generates code from a template twice as fast as Ruby 2.4
 
 === Miscellaneous changes
 
-* Print backtrace and error message in reverse order if STDERR is unchanged and a tty.
+* Print backtrace and error message in reverse order if $stderr is unchanged and a tty.
   [Feature #8661] [experimental]
 
-* Print error message in bold/underlined text if STDERR is unchanged and a tty.
+* Print error message in bold/underlined text if $stderr is unchanged and a tty.
   [Feature #14140] [experimental]
 
 * configure option --with-ext now mandates its arguments.  So for

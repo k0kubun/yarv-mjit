@@ -14,13 +14,14 @@
 #define rb_data_object_alloc rb_data_object_alloc
 #define rb_data_typed_object_alloc rb_data_typed_object_alloc
 
-#include "internal.h"
+#include "ruby/encoding.h"
+#include "ruby/io.h"
 #include "ruby/st.h"
 #include "ruby/re.h"
-#include "ruby/io.h"
 #include "ruby/thread.h"
 #include "ruby/util.h"
 #include "ruby/debug.h"
+#include "internal.h"
 #include "eval_intern.h"
 #include "vm_core.h"
 #include "gc.h"
@@ -2670,7 +2671,7 @@ rb_undefine_finalizer(VALUE obj)
 static void
 should_be_callable(VALUE block)
 {
-    if (!rb_obj_respond_to(block, rb_intern("call"), TRUE)) {
+    if (!rb_obj_respond_to(block, idCall, TRUE)) {
 	rb_raise(rb_eArgError, "wrong type argument %"PRIsVALUE" (should be callable)",
 		 rb_obj_class(block));
     }

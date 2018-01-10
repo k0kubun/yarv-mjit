@@ -56,7 +56,7 @@ static struct {
 
 #if defined(HAVE_PTHREAD_CONDATTR_SETCLOCK) && defined(HAVE_CLOCKID_T) && \
     defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) && \
-    defined(HAVE_CLOCK_GETTIME) && defined(HAVE_PTHREAD_CONDATTR_INIT)
+    defined(HAVE_CLOCK_GETTIME)
 #define USE_MONOTONIC_COND 1
 #else
 #define USE_MONOTONIC_COND 0
@@ -262,7 +262,6 @@ rb_native_mutex_destroy(pthread_mutex_t *lock)
 void
 rb_native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
 {
-#ifdef HAVE_PTHREAD_COND_INIT
     int r;
 # if USE_MONOTONIC_COND
     pthread_condattr_t attr;
@@ -287,18 +286,15 @@ rb_native_cond_initialize(rb_nativethread_cond_t *cond, int flags)
     }
 
     return;
-#endif
 }
 
 void
 rb_native_cond_destroy(rb_nativethread_cond_t *cond)
 {
-#ifdef HAVE_PTHREAD_COND_INIT
     int r = pthread_cond_destroy(&cond->cond);
     if (r != 0) {
 	rb_bug_errno("pthread_cond_destroy", r);
     }
-#endif
 }
 
 /*
@@ -839,11 +835,6 @@ native_thread_init_stack(rb_thread_t *th)
 	    th->ec->machine.stack_start = (VALUE *)&curr;
 	    th->ec->machine.stack_maxsize = size - diff;
 	}
-#elif defined get_stack_of
-	if (!th->ec->machine.stack_maxsize) {
-	    rb_native_mutex_lock(&th->interrupt_lock);
-	    rb_native_mutex_unlock(&th->interrupt_lock);
-	}
 #else
 	rb_raise(rb_eNotImpError, "ruby engine can initialize only in the main thread");
 #endif
@@ -992,12 +983,8 @@ native_thread_create(rb_thread_t *th)
 	thread_debug("create (use cached thread): %p\n", (void *)th);
     }
     else {
-#ifdef HAVE_PTHREAD_ATTR_INIT
 	pthread_attr_t attr;
 	pthread_attr_t *const attrp = &attr;
-#else
-	pthread_attr_t *const attrp = NULL;
-#endif
 	const size_t stack_size = th->vm->default_params.thread_machine_stack_size;
 	const size_t space = space_size(stack_size);
 
@@ -1007,7 +994,6 @@ native_thread_create(rb_thread_t *th)
         th->ec->machine.register_stack_maxsize = th->ec->machine.stack_maxsize;
 #endif
 
-#ifdef HAVE_PTHREAD_ATTR_INIT
 	CHECK_ERR(pthread_attr_init(&attr));
 
 # ifdef PTHREAD_STACK_MIN
@@ -1019,25 +1005,12 @@ native_thread_create(rb_thread_t *th)
 	CHECK_ERR(pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED));
 # endif
 	CHECK_ERR(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED));
-#endif
-#ifdef get_stack_of
-	rb_native_mutex_lock(&th->interrupt_lock);
-#endif
+
 	err = pthread_create(&th->thread_id, attrp, thread_start_func_1, th);
-#ifdef get_stack_of
-	if (!err) {
-	    get_stack_of(th->thread_id,
-			 &th->ec->machine.stack_start,
-			 &th->ec->machine.stack_maxsize);
-	}
-	rb_native_mutex_unlock(&th->interrupt_lock);
-#endif
 	thread_debug("create: %p (%d)\n", (void *)th, err);
 	/* should be done in the created thread */
 	fill_thread_id_str(th);
-#ifdef HAVE_PTHREAD_ATTR_INIT
 	CHECK_ERR(pthread_attr_destroy(&attr));
-#endif
     }
     return err;
 }
@@ -1595,8 +1568,8 @@ static void
 rb_thread_create_timer_thread(void)
 {
     if (!timer_thread.created) {
+	size_t stack_size = 0;
 	int err;
-#ifdef HAVE_PTHREAD_ATTR_INIT
 	pthread_attr_t attr;
 	rb_vm_t *vm = GET_VM();
 
@@ -1608,6 +1581,7 @@ rb_thread_create_timer_thread(void)
         }
 # ifdef PTHREAD_STACK_MIN
 	{
+	    size_t stack_min = PTHREAD_STACK_MIN; /* may be dynamic, get only once */
 	    const size_t min_size = (4096 * 4);
 	    /* Allocate the machine stack for the timer thread
 	     * at least 16KB (4 pages).  FreeBSD 8.2 AMD64 causes
@@ -1621,13 +1595,18 @@ rb_thread_create_timer_thread(void)
 		THREAD_DEBUG != 0
 #endif
 	    };
-	    size_t stack_size = PTHREAD_STACK_MIN; /* may be dynamic, get only once */
+	    stack_size = stack_min;
 	    if (stack_size < min_size) stack_size = min_size;
-	    if (needs_more_stack) stack_size += BUFSIZ;
-	    pthread_attr_setstacksize(&attr, stack_size);
+	    if (needs_more_stack) {
+		stack_size += +((BUFSIZ - 1) / stack_min + 1) * stack_min;
+	    }
+	    err = pthread_attr_setstacksize(&attr, stack_size);
+	    if (err != 0) {
+		rb_bug("pthread_attr_setstacksize(.., %"PRIuSIZE") failed: %s",
+			stack_size, strerror(err));
+	    }
 	}
 # endif
-#endif
 
 #if USE_SLEEPY_TIMER_THREAD
 	err = setup_communication_pipe();
@@ -1642,7 +1621,6 @@ rb_thread_create_timer_thread(void)
 	if (timer_thread.created) {
 	    rb_bug("rb_thread_create_timer_thread: Timer thread was already created\n");
 	}
-#ifdef HAVE_PTHREAD_ATTR_INIT
 	err = pthread_create(&timer_thread.id, &attr, thread_timer, &vm->gvl);
 	pthread_attr_destroy(&attr);
 
@@ -1653,14 +1631,19 @@ rb_thread_create_timer_thread(void)
 	     * storage can cause small stack sizes to fail.  So lets hope the
 	     * default stack size is enough for them:
 	     */
+	    stack_size = 0;
 	    err = pthread_create(&timer_thread.id, NULL, thread_timer, &vm->gvl);
 	}
-#else
-	err = pthread_create(&timer_thread.id, NULL, thread_timer, &vm->gvl);
-#endif
 	if (err != 0) {
 	    rb_warn("pthread_create failed for timer: %s, scheduling broken",
 		    strerror(err));
+	    if (stack_size) {
+		rb_warn("timer thread stack size: %"PRIuSIZE, stack_size);
+	    }
+	    else {
+		rb_warn("timer thread stack size: system default");
+	    }
+	    VM_ASSERT(err == 0);
 #if USE_SLEEPY_TIMER_THREAD
 	    CLOSE_INVALIDATE(normal[0]);
 	    CLOSE_INVALIDATE(normal[1]);

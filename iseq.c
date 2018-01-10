@@ -32,6 +32,12 @@ VALUE rb_cISeq;
 static VALUE iseqw_new(const rb_iseq_t *iseq);
 static const rb_iseq_t *iseqw_check(VALUE iseqw);
 
+#if VM_INSN_INFO_TABLE_IMPL == 2
+static struct succ_index_table *succ_index_table_create(int max_pos, int *data, int size);
+static unsigned int *succ_index_table_invert(int max_pos, struct succ_index_table *sd, int size);
+static int succ_index_lookup(const struct succ_index_table *sd, int x);
+#endif
+
 #define hidden_obj_p(obj) (!SPECIAL_CONST_P(obj) && !RBASIC(obj)->klass)
 
 static inline VALUE
@@ -78,7 +84,10 @@ rb_iseq_free(const rb_iseq_t *iseq)
 	if (iseq->body) {
 	    ruby_xfree((void *)iseq->body->iseq_encoded);
 	    ruby_xfree((void *)iseq->body->insns_info.body);
-	    ruby_xfree((void *)iseq->body->insns_info.positions);
+	    if (iseq->body->insns_info.positions) ruby_xfree((void *)iseq->body->insns_info.positions);
+#if VM_INSN_INFO_TABLE_IMPL == 2
+	    if (iseq->body->insns_info.succ_index_table) ruby_xfree(iseq->body->insns_info.succ_index_table);
+#endif
 	    ruby_xfree((void *)iseq->body->local_table);
 	    ruby_xfree((void *)iseq->body->is_entries);
 
@@ -244,7 +253,7 @@ rb_iseq_pathobj_set(const rb_iseq_t *iseq, VALUE path, VALUE realpath)
 }
 
 static rb_iseq_location_t *
-iseq_location_setup(rb_iseq_t *iseq, VALUE name, VALUE path, VALUE realpath, VALUE first_lineno, const rb_code_range_t *code_range)
+iseq_location_setup(rb_iseq_t *iseq, VALUE name, VALUE path, VALUE realpath, VALUE first_lineno, const rb_code_location_t *code_location)
 {
     rb_iseq_location_t *loc = &iseq->body->location;
 
@@ -252,14 +261,14 @@ iseq_location_setup(rb_iseq_t *iseq, VALUE name, VALUE path, VALUE realpath, VAL
     RB_OBJ_WRITE(iseq, &loc->label, name);
     RB_OBJ_WRITE(iseq, &loc->base_label, name);
     loc->first_lineno = first_lineno;
-    if (code_range) {
-	loc->code_range = *code_range;
+    if (code_location) {
+	loc->code_location = *code_location;
     }
     else {
-	loc->code_range.first_loc.lineno = 0;
-	loc->code_range.first_loc.column = 0;
-	loc->code_range.last_loc.lineno = -1;
-	loc->code_range.last_loc.column = -1;
+	loc->code_location.beg_pos.lineno = 0;
+	loc->code_location.beg_pos.column = 0;
+	loc->code_location.end_pos.lineno = -1;
+	loc->code_location.end_pos.column = -1;
     }
 
     return loc;
@@ -299,7 +308,7 @@ rb_iseq_add_mark_object(const rb_iseq_t *iseq, VALUE obj)
 
 static VALUE
 prepare_iseq_build(rb_iseq_t *iseq,
-		   VALUE name, VALUE path, VALUE realpath, VALUE first_lineno, const rb_code_range_t *code_range,
+		   VALUE name, VALUE path, VALUE realpath, VALUE first_lineno, const rb_code_location_t *code_location,
 		   const rb_iseq_t *parent, enum iseq_type type,
 		   const rb_compile_option_t *option)
 {
@@ -313,7 +322,7 @@ prepare_iseq_build(rb_iseq_t *iseq,
     set_relation(iseq, parent);
 
     name = rb_fstring(name);
-    iseq_location_setup(iseq, name, path, realpath, first_lineno, code_range);
+    iseq_location_setup(iseq, name, path, realpath, first_lineno, code_location);
     if (iseq != iseq->body->local_iseq) {
 	RB_OBJ_WRITE(iseq, &iseq->body->location.base_label, iseq->body->local_iseq->body->location.label);
     }
@@ -353,6 +362,34 @@ prepare_iseq_build(rb_iseq_t *iseq,
 static void validate_get_insn_info(rb_iseq_t *iseq);
 #endif
 
+void
+rb_iseq_insns_info_encode_positions(const rb_iseq_t *iseq)
+{
+#if VM_INSN_INFO_TABLE_IMPL == 2
+    int size = iseq->body->insns_info.size;
+    int max_pos = iseq->body->iseq_size;
+    int *data = (int *)iseq->body->insns_info.positions;
+    if (iseq->body->insns_info.succ_index_table) ruby_xfree(iseq->body->insns_info.succ_index_table);
+    iseq->body->insns_info.succ_index_table = succ_index_table_create(max_pos, data, size);
+#if VM_CHECK_MODE == 0
+    ruby_xfree(iseq->body->insns_info.positions);
+    iseq->body->insns_info.positions = NULL;
+#endif
+#endif
+}
+
+void
+rb_iseq_insns_info_decode_positions(const rb_iseq_t *iseq)
+{
+#if VM_INSN_INFO_TABLE_IMPL == 2
+    int size = iseq->body->insns_info.size;
+    int max_pos = iseq->body->iseq_size;
+    struct succ_index_table *sd = iseq->body->insns_info.succ_index_table;
+    if (iseq->body->insns_info.positions) ruby_xfree(iseq->body->insns_info.positions);
+    iseq->body->insns_info.positions = succ_index_table_invert(max_pos, sd, size);
+#endif
+}
+
 static VALUE
 finish_iseq_build(rb_iseq_t *iseq)
 {
@@ -360,6 +397,13 @@ finish_iseq_build(rb_iseq_t *iseq)
     VALUE err = data->err_info;
     ISEQ_COMPILE_DATA_CLEAR(iseq);
     compile_data_free(data);
+
+#if VM_INSN_INFO_TABLE_IMPL == 2 /* succinct bitvector */
+    /* create succ_index_table */
+    if (iseq->body->insns_info.succ_index_table == NULL) {
+	rb_iseq_insns_info_encode_positions(iseq);
+    }
+#endif
 
 #if VM_CHECK_MODE > 0 && VM_INSN_INFO_TABLE_IMPL > 0
     validate_get_insn_info(iseq);
@@ -603,13 +647,13 @@ iseq_load(VALUE data, const rb_iseq_t *parent, VALUE opt)
     rb_iseq_t *iseq = iseq_alloc();
 
     VALUE magic, version1, version2, format_type, misc;
-    VALUE name, path, realpath, first_lineno, code_range;
+    VALUE name, path, realpath, first_lineno, code_location;
     VALUE type, body, locals, params, exception;
 
     st_data_t iseq_type;
     rb_compile_option_t option;
     int i = 0;
-    rb_code_range_t tmp_loc = { {0, 0}, {-1, -1} };
+    rb_code_location_t tmp_loc = { {0, 0}, {-1, -1} };
 
     /* [magic, major_version, minor_version, format_type, misc,
      *  label, path, first_lineno,
@@ -644,12 +688,12 @@ iseq_load(VALUE data, const rb_iseq_t *parent, VALUE opt)
 	rb_raise(rb_eTypeError, "unsupport type: :%"PRIsVALUE, rb_sym2str(type));
     }
 
-    code_range = rb_hash_aref(misc, ID2SYM(rb_intern("code_range")));
-    if (RB_TYPE_P(code_range, T_ARRAY) && RARRAY_LEN(code_range) == 4) {
-	tmp_loc.first_loc.lineno = NUM2INT(rb_ary_entry(code_range, 0));
-	tmp_loc.first_loc.column = NUM2INT(rb_ary_entry(code_range, 1));
-	tmp_loc.last_loc.lineno = NUM2INT(rb_ary_entry(code_range, 2));
-	tmp_loc.last_loc.column = NUM2INT(rb_ary_entry(code_range, 3));
+    code_location = rb_hash_aref(misc, ID2SYM(rb_intern("code_location")));
+    if (RB_TYPE_P(code_location, T_ARRAY) && RARRAY_LEN(code_location) == 4) {
+	tmp_loc.beg_pos.lineno = NUM2INT(rb_ary_entry(code_location, 0));
+	tmp_loc.beg_pos.column = NUM2INT(rb_ary_entry(code_location, 1));
+	tmp_loc.end_pos.lineno = NUM2INT(rb_ary_entry(code_location, 2));
+	tmp_loc.end_pos.column = NUM2INT(rb_ary_entry(code_location, 3));
     }
 
     make_compile_option(&option, opt);
@@ -794,12 +838,12 @@ rb_iseq_method_name(const rb_iseq_t *iseq)
 }
 
 void
-rb_iseq_code_range(const rb_iseq_t *iseq, int *first_lineno, int *first_column, int *last_lineno, int *last_column)
+rb_iseq_code_location(const rb_iseq_t *iseq, int *beg_pos_lineno, int *beg_pos_column, int *end_pos_lineno, int *end_pos_column)
 {
-    if (first_lineno) *first_lineno = iseq->body->location.code_range.first_loc.lineno;
-    if (first_column) *first_column = iseq->body->location.code_range.first_loc.column;
-    if (last_lineno) *last_lineno = iseq->body->location.code_range.last_loc.lineno;
-    if (last_column) *last_column = iseq->body->location.code_range.last_loc.column;
+    if (beg_pos_lineno) *beg_pos_lineno = iseq->body->location.code_location.beg_pos.lineno;
+    if (beg_pos_column) *beg_pos_column = iseq->body->location.code_location.beg_pos.column;
+    if (end_pos_lineno) *end_pos_lineno = iseq->body->location.code_location.end_pos.lineno;
+    if (end_pos_column) *end_pos_column = iseq->body->location.code_location.end_pos.column;
 }
 
 VALUE
@@ -1328,6 +1372,42 @@ get_insn_info(const rb_iseq_t *iseq, size_t pos)
 }
 #endif
 
+#if VM_INSN_INFO_TABLE_IMPL == 2 /* succinct bitvector */
+static const struct iseq_insn_info_entry *
+get_insn_info_succinct_bitvector(const rb_iseq_t *iseq, size_t pos)
+{
+    size_t size = iseq->body->insns_info.size;
+    const struct iseq_insn_info_entry *insns_info = iseq->body->insns_info.body;
+    const unsigned int *positions = iseq->body->insns_info.positions;
+    const int debug = 0;
+
+    if (debug) {
+	printf("size: %"PRIuSIZE"\n", size);
+	printf("insns_info[%"PRIuSIZE"]: position: %d, line: %d, pos: %"PRIuSIZE"\n",
+	       (size_t)0, positions[0], insns_info[0].line_no, pos);
+    }
+
+    if (size == 0) {
+	return NULL;
+    }
+    else if (size == 1) {
+	return &insns_info[0];
+    }
+    else {
+	int index;
+	VM_ASSERT(iseq->body->insns_info.succ_index_table != NULL);
+	index = succ_index_lookup(iseq->body->insns_info.succ_index_table, (int)pos);
+	return &insns_info[index-1];
+    }
+}
+
+static const struct iseq_insn_info_entry *
+get_insn_info(const rb_iseq_t *iseq, size_t pos)
+{
+    return get_insn_info_succinct_bitvector(iseq, pos);
+}
+#endif
+
 #if VM_CHECK_MODE > 0 || VM_INSN_INFO_TABLE_IMPL == 0
 static const struct iseq_insn_info_entry *
 get_insn_info_linear_search(const rb_iseq_t *iseq, size_t pos)
@@ -1560,7 +1640,6 @@ rb_insn_operand_intern(const rb_iseq_t *iseq,
 # define CALL_FLAG(n) if (ci->flag & VM_CALL_##n) rb_ary_push(flags, rb_str_new2(#n))
 		CALL_FLAG(ARGS_SPLAT);
 		CALL_FLAG(ARGS_BLOCKARG);
-		CALL_FLAG(ARGS_BLOCKARG_BLOCKPARAM);
 		CALL_FLAG(FCALL);
 		CALL_FLAG(VCALL);
 		CALL_FLAG(ARGS_SIMPLE);
@@ -1705,11 +1784,11 @@ iseq_inspect(const rb_iseq_t *iseq)
     else {
 	return rb_sprintf("#<ISeq:%s@%s:%d (%d,%d)-(%d,%d)>",
 			  RSTRING_PTR(iseq->body->location.label), RSTRING_PTR(rb_iseq_path(iseq)),
-			  iseq->body->location.code_range.first_loc.lineno,
-			  iseq->body->location.code_range.first_loc.lineno,
-			  iseq->body->location.code_range.first_loc.column,
-			  iseq->body->location.code_range.last_loc.lineno,
-			  iseq->body->location.code_range.last_loc.column);
+			  iseq->body->location.code_location.beg_pos.lineno,
+			  iseq->body->location.code_location.beg_pos.lineno,
+			  iseq->body->location.code_location.beg_pos.column,
+			  iseq->body->location.code_location.end_pos.lineno,
+			  iseq->body->location.code_location.end_pos.column);
     }
 }
 
@@ -2126,7 +2205,7 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
 {
     unsigned int i;
     long l;
-    size_t ti;
+    const struct iseq_insn_info_entry *prev_insn_info;
     unsigned int pos;
     int last_line = 0;
     VALUE *seq, *iseq_original;
@@ -2379,9 +2458,10 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
 
     /* make body with labels and insert line number */
     body = rb_ary_new();
-    ti = 0;
+    prev_insn_info = NULL;
 
     for (l=0, pos=0; l<RARRAY_LEN(nbody); l++) {
+	const struct iseq_insn_info_entry *info;
 	VALUE ary = RARRAY_AREF(nbody, l);
 	st_data_t label;
 
@@ -2389,27 +2469,26 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
 	    rb_ary_push(body, (VALUE)label);
 	}
 
-	if (ti < iseq->body->insns_info.size) {
-	    const struct iseq_insn_info_entry *info = &iseq->body->insns_info.body[ti];
-	    if (iseq->body->insns_info.positions[ti] == pos) {
-		int line = info->line_no;
-		rb_event_flag_t events = info->events;
+	info = get_insn_info(iseq, pos);
 
-		if (line > 0 && last_line != line) {
-		    rb_ary_push(body, INT2FIX(line));
-		    last_line = line;
-		}
-#define CHECK_EVENT(ev) if (events & ev) rb_ary_push(body, ID2SYM(rb_intern(#ev)));
-		CHECK_EVENT(RUBY_EVENT_LINE);
-		CHECK_EVENT(RUBY_EVENT_CLASS);
-		CHECK_EVENT(RUBY_EVENT_END);
-		CHECK_EVENT(RUBY_EVENT_CALL);
-		CHECK_EVENT(RUBY_EVENT_RETURN);
-		CHECK_EVENT(RUBY_EVENT_B_CALL);
-		CHECK_EVENT(RUBY_EVENT_B_RETURN);
-#undef CHECK_EVENT
-		ti++;
+	if (prev_insn_info != info) {
+	    int line = info->line_no;
+	    rb_event_flag_t events = info->events;
+
+	    if (line > 0 && last_line != line) {
+		rb_ary_push(body, INT2FIX(line));
+		last_line = line;
 	    }
+#define CHECK_EVENT(ev) if (events & ev) rb_ary_push(body, ID2SYM(rb_intern(#ev)));
+	    CHECK_EVENT(RUBY_EVENT_LINE);
+	    CHECK_EVENT(RUBY_EVENT_CLASS);
+	    CHECK_EVENT(RUBY_EVENT_END);
+	    CHECK_EVENT(RUBY_EVENT_CALL);
+	    CHECK_EVENT(RUBY_EVENT_RETURN);
+	    CHECK_EVENT(RUBY_EVENT_B_CALL);
+	    CHECK_EVENT(RUBY_EVENT_B_RETURN);
+#undef CHECK_EVENT
+	    prev_insn_info = info;
 	}
 
 	rb_ary_push(body, ary);
@@ -2422,12 +2501,12 @@ iseq_data_to_ary(const rb_iseq_t *iseq)
     rb_hash_aset(misc, ID2SYM(rb_intern("arg_size")), INT2FIX(iseq->body->param.size));
     rb_hash_aset(misc, ID2SYM(rb_intern("local_size")), INT2FIX(iseq->body->local_table_size));
     rb_hash_aset(misc, ID2SYM(rb_intern("stack_max")), INT2FIX(iseq->body->stack_max));
-    rb_hash_aset(misc, ID2SYM(rb_intern("code_range")),
+    rb_hash_aset(misc, ID2SYM(rb_intern("code_location")),
 	    rb_ary_new_from_args(4,
-		INT2FIX(iseq->body->location.code_range.first_loc.lineno),
-		INT2FIX(iseq->body->location.code_range.first_loc.column),
-		INT2FIX(iseq->body->location.code_range.last_loc.lineno),
-		INT2FIX(iseq->body->location.code_range.last_loc.column)));
+		INT2FIX(iseq->body->location.code_location.beg_pos.lineno),
+		INT2FIX(iseq->body->location.code_location.beg_pos.column),
+		INT2FIX(iseq->body->location.code_location.end_pos.lineno),
+		INT2FIX(iseq->body->location.code_location.end_pos.column)));
 
     /*
      * [:magic, :major_version, :minor_version, :format_type, :misc,
@@ -2717,6 +2796,138 @@ iseqw_s_load_from_binary_extra_data(VALUE self, VALUE str)
 {
     return  iseq_ibf_load_extra_data(str);
 }
+
+#if VM_INSN_INFO_TABLE_IMPL == 2
+
+/* An implementation of succinct bit-vector for insn_info table.
+ *
+ * A succinct bit-vector is a small and efficient data structure that provides
+ * a bit-vector augmented with an index for O(1) rank operation:
+ *
+ *   rank(bv, n): the number of 1's within a range from index 0 to index n
+ *
+ * This can be used to lookup insn_info table from PC.
+ * For example, consider the following iseq and insn_info_table:
+ *
+ *  iseq               insn_info_table
+ *  PC  insn+operand   position  lineno event
+ *   0: insn1                 0: 1      [Li]
+ *   2: insn2                 2: 2      [Li]  <= (A)
+ *   5: insn3                 8: 3      [Li]  <= (B)
+ *   8: insn4
+ *
+ * In this case, a succinct bit-vector whose indexes 0, 2, 8 is "1" and
+ * other indexes is "0", i.e., "101000001", is created.
+ * To lookup the lineno of insn2, calculate rank("10100001", 2) = 2, so
+ * the line (A) is the entry in question.
+ * To lookup the lineno of insn4, calculate rank("10100001", 8) = 3, so
+ * the line (B) is the entry in question.
+ *
+ * A naive implementatoin of succinct bit-vector works really well
+ * not only for large size but also for small size.  However, it has
+ * tiny overhead for very small size.  So, this implementation consist
+ * of two parts: one part is the "immediate" table that keeps rank result
+ * as a raw table, and the other part is a normal succinct bit-vector.
+ */
+
+#define IMMEDIATE_TABLE_SIZE 54 /* a multiple of 9, and < 128 */
+
+struct succ_index_table {
+    uint64_t imm_part[IMMEDIATE_TABLE_SIZE / 9];
+    struct succ_dict_block {
+	unsigned int rank;
+	uint64_t small_block_ranks; /* 9 bits * 7 = 63 bits */
+	uint64_t bits[512/64];
+    } succ_part[];
+} succ_index_table;
+
+#define imm_block_rank_set(v, i, r) (v) |= (uint64_t)(r) << (7 * (i))
+#define imm_block_rank_get(v, i) (((int)((v) >> ((i) * 7))) & 0x7f)
+#define small_block_rank_set(v, i, r) (v) |= (uint64_t)(r) << (9 * ((i) - 1))
+#define small_block_rank_get(v, i) ((i) == 0 ? 0 : (((int)((v) >> (((i) - 1) * 9))) & 0x1ff))
+
+static struct succ_index_table *
+succ_index_table_create(int max_pos, int *data, int size)
+{
+    const int imm_size = (max_pos < IMMEDIATE_TABLE_SIZE ? max_pos + 8 : IMMEDIATE_TABLE_SIZE) / 9;
+    const int succ_size = (max_pos < IMMEDIATE_TABLE_SIZE ? 0 : (max_pos - IMMEDIATE_TABLE_SIZE + 511)) / 512;
+    struct succ_index_table *sd = ruby_xcalloc(imm_size * sizeof(uint64_t) + succ_size * sizeof(struct succ_dict_block), 1); /* zero cleared */
+    int i, j, k, r;
+
+    r = 0;
+    for (j = 0; j < imm_size; j++) {
+	for (i = 0; i < 9; i++) {
+	    if (r < size && data[r] == j * 9 + i) r++;
+	    imm_block_rank_set(sd->imm_part[j], i, r);
+	}
+    }
+    for (k = 0; k < succ_size; k++) {
+	struct succ_dict_block *sd_block = &sd->succ_part[k];
+	int small_rank = 0;
+	sd_block->rank = r;
+	for (j = 0; j < 8; j++) {
+	    uint64_t bits = 0;
+	    if (j) small_block_rank_set(sd_block->small_block_ranks, j, small_rank);
+	    for (i = 0; i < 64; i++) {
+		if (r < size && data[r] == k * 512 + j * 64 + i + IMMEDIATE_TABLE_SIZE) {
+		    bits |= ((uint64_t)1) << i;
+		    r++;
+		}
+	    }
+	    sd_block->bits[j] = bits;
+	    small_rank += rb_popcount64(bits);
+	}
+    }
+    return sd;
+}
+
+static unsigned int *
+succ_index_table_invert(int max_pos, struct succ_index_table *sd, int size)
+{
+    const int imm_size = (max_pos < IMMEDIATE_TABLE_SIZE ? max_pos + 8 : IMMEDIATE_TABLE_SIZE) / 9;
+    const int succ_size = (max_pos < IMMEDIATE_TABLE_SIZE ? 0 : (max_pos - IMMEDIATE_TABLE_SIZE + 511)) / 512;
+    unsigned int *positions = ruby_xmalloc(sizeof(unsigned int) * size), *p;
+    int i, j, k, r = -1;
+    p = positions;
+    for (j = 0; j < imm_size; j++) {
+	for (i = 0; i < 9; i++) {
+	    int nr = imm_block_rank_get(sd->imm_part[j], i);
+	    if (r != nr) *p++ = j * 9 + i;
+	    r = nr;
+	}
+    }
+    for (k = 0; k < succ_size; k++) {
+	for (j = 0; j < 8; j++) {
+	    for (i = 0; i < 64; i++) {
+		if (sd->succ_part[k].bits[j] & (((uint64_t)1) << i)) {
+		    *p++ = k * 512 + j * 64 + i + IMMEDIATE_TABLE_SIZE;
+		}
+	    }
+	}
+    }
+    return positions;
+}
+
+static int
+succ_index_lookup(const struct succ_index_table *sd, int x)
+{
+    if (x < IMMEDIATE_TABLE_SIZE) {
+	const int i = x / 9;
+	const int j = x % 9;
+	return imm_block_rank_get(sd->imm_part[i], j);
+    }
+    else {
+	const int block_index = (x - IMMEDIATE_TABLE_SIZE) / 512;
+	const struct succ_dict_block *block = &sd->succ_part[block_index];
+	const int block_bit_index = (x - IMMEDIATE_TABLE_SIZE) % 512;
+	const int small_block_index = block_bit_index / 64;
+	const int small_block_popcount = small_block_rank_get(block->small_block_ranks, small_block_index);
+	const int popcnt = rb_popcount64(block->bits[small_block_index] << (63 - block_bit_index % 64));
+
+	return block->rank + small_block_popcount + popcnt;
+    }
+}
+#endif
 
 /*
  *  Document-class: RubyVM::InstructionSequence

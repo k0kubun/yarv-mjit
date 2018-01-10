@@ -2048,19 +2048,45 @@ vm_call_opt_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct
     return vm_call_method(ec, reg_cfp, calling, ci, cc);
 }
 
-static VALUE vm_invoke_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, VALUE block_handler);
+static inline VALUE vm_invoke_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, VALUE block_handler);
+
+NOINLINE(static VALUE
+	 vm_invoke_block_opt_call(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
+				  struct rb_calling_info *calling, const struct rb_call_info *ci, VALUE block_handler));
 
 static VALUE
-vm_call_opt_call(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc)
+vm_invoke_block_opt_call(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
+			 struct rb_calling_info *calling, const struct rb_call_info *ci, VALUE block_handler)
 {
-    VALUE procval = calling->recv;
     int argc = calling->argc;
 
     /* remove self */
     if (argc > 0) MEMMOVE(&TOPN(argc), &TOPN(argc-1), VALUE, argc);
     DEC_SP(1);
 
-    return vm_invoke_block(ec, reg_cfp, calling, ci, VM_BH_FROM_PROC(procval));
+    return vm_invoke_block(ec, reg_cfp, calling, ci, block_handler);
+}
+
+static VALUE
+vm_call_opt_call(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc)
+{
+    VALUE procval = calling->recv;
+    return vm_invoke_block_opt_call(ec, reg_cfp, calling, ci, VM_BH_FROM_PROC(procval));
+}
+
+static VALUE
+vm_call_opt_block_call(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc)
+{
+    VALUE block_handler = VM_ENV_BLOCK_HANDLER(reg_cfp->ep);
+
+    if (BASIC_OP_UNREDEFINED_P(BOP_CALL, PROC_REDEFINED_OP_FLAG)) {
+	return vm_invoke_block_opt_call(ec, reg_cfp, calling, ci, block_handler);
+    }
+    else {
+	calling->recv = rb_vm_bh_to_procval(ec, block_handler);
+	vm_search_method(ci, cc, calling->recv);
+	return vm_call_general(ec, reg_cfp, calling, ci, cc);
+    }
 }
 
 static VALUE
@@ -2265,6 +2291,9 @@ vm_call_method_each_type(rb_execution_context_t *ec, rb_control_frame_t *cfp, st
 	  case OPTIMIZED_METHOD_TYPE_CALL:
 	    CI_SET_FASTPATH(cc, vm_call_opt_call, TRUE);
 	    return vm_call_opt_call(ec, cfp, calling, ci, cc);
+	  case OPTIMIZED_METHOD_TYPE_BLOCK_CALL:
+	    CI_SET_FASTPATH(cc, vm_call_opt_block_call, TRUE);
+	    return vm_call_opt_block_call(ec, cfp, calling, ci, cc);
 	  default:
 	    rb_bug("vm_call_method: unsupported optimized method type (%d)",
 		   cc->me->def->body.optimize_type);
@@ -2690,8 +2719,9 @@ vm_proc_to_block_handler(VALUE procval)
     return Qundef;
 }
 
-static VALUE
-vm_invoke_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, VALUE block_handler)
+static inline VALUE
+vm_invoke_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp,
+		struct rb_calling_info *calling, const struct rb_call_info *ci, VALUE block_handler)
 {
     int is_lambda = FALSE;
 
