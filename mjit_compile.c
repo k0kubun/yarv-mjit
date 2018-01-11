@@ -118,7 +118,8 @@ fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int res
 	    fprintf(f, "      *(cfp->sp) = *(cfp->sp - 1);\n");
 	    fprintf(f, "      *(cfp->sp - 1) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
 	    fprintf(f, "      cfp->sp++;\n");
-	} else { /* for opt_aref_with, just put the key */
+	}
+	else { /* for opt_aref_with, just put the key */
 	    fprintf(f, "      *(cfp->sp++) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
 	}
     }

@@ -452,7 +452,8 @@ add_to_list(struct rb_mjit_unit_node *node, struct rb_mjit_unit_list *list)
     /* Append iseq to list */
     if (list->head == NULL) {
 	list->head = node;
-    } else {
+    }
+    else {
 	struct rb_mjit_unit_node *tail = list->head;
 	while (tail->next != NULL) {
 	    tail = tail->next;
@@ -469,12 +470,15 @@ remove_from_list(struct rb_mjit_unit_node *node, struct rb_mjit_unit_list *list)
     if (node->prev && node->next) {
 	node->prev->next = node->next;
 	node->next->prev = node->prev;
-    } else if (node->prev == NULL && node->next) {
+    }
+    else if (node->prev == NULL && node->next) {
 	list->head = node->next;
 	node->next->prev = NULL;
-    } else if (node->prev && node->next == NULL) {
+    }
+    else if (node->prev && node->next == NULL) {
 	node->prev->next = NULL;
-    } else {
+    }
+    else {
 	list->head = NULL;
     }
     list->length--;
@@ -623,7 +627,8 @@ compile_c_to_so(const char *c_file, const char *so_file)
 	CLANG_USE_PCH_ARGS[1] = pch_file;
 	args = form_args(5, (mjit_opts.debug ? CLANG_COMMON_ARGS_DEBUG : CLANG_COMMON_ARGS),
 			 CLANG_USE_PCH_ARGS, input, output, libs);
-    } else {
+    }
+    else {
 	args = form_args(5, (mjit_opts.debug ? GCC_COMMON_ARGS_DEBUG : GCC_COMMON_ARGS),
 			 GCC_USE_PCH_ARGS, input, output, libs);
     }
@@ -825,7 +830,8 @@ mjit_cont_new(rb_execution_context_t *ec)
     CRITICAL_SECTION_START(3, "in mjit_cont_new");
     if (first_cont == NULL) {
 	cont->next = cont->prev = NULL;
-    } else {
+    }
+    else {
 	cont->prev = NULL;
 	cont->next = first_cont;
 	first_cont->prev = cont;
@@ -845,7 +851,8 @@ mjit_cont_free(struct mjit_cont *cont)
 	first_cont = cont->next;
 	if (first_cont != NULL)
 	    first_cont->prev = NULL;
-    } else {
+    }
+    else {
 	cont->prev->next = cont->next;
 	if (cont->next != NULL)
 	    cont->next->prev = cont->prev;
@@ -1007,7 +1014,7 @@ mjit_get_iseq_func(const struct rb_iseq_constant_body *body)
 	CRITICAL_SECTION_START(3, "in mjit_get_iseq_func for a client wakeup");
 	rb_native_cond_broadcast(&mjit_worker_wakeup);
 	CRITICAL_SECTION_FINISH(3, "in mjit_get_iseq_func for a client wakeup");
-        rb_thread_wait_for(tv);
+	rb_thread_wait_for(tv);
     }
     return body->jit_func;
 }
