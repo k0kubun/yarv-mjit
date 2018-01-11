@@ -52,9 +52,7 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
     }
 }
 
-/* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`.
-   This method inlines fast path of vm_call_method_each_type for some types assuming
-   that cc passes mjit_check_invalid_cc. */
+/* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`. */
 static void
 fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 {
