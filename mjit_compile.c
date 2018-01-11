@@ -607,7 +607,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    arg.last_value = Qundef;
 
 	    fprintf(f, "  switch (vm_case_dispatch(0x%"PRIxVALUE", 0x%"PRIxVALUE", stack[%d])) {\n", operands[0], operands[1], --b->stack_size);
-	    rb_hash_foreach(operands[0], compile_case_dispatch_each, (VALUE)&arg);
+	    st_foreach(RHASH_TBL_RAW(operands[0]), compile_case_dispatch_each, (VALUE)&arg);
 	    fprintf(f, "    case %lu:\n", operands[1]);
 	    fprintf(f, "      goto label_%lu;\n", arg.base_pos + operands[1]);
 	    fprintf(f, "  }\n");
