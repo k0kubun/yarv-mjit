@@ -1900,10 +1900,9 @@ vm_method_cfunc_entry(const rb_callable_method_entry_t *me)
 }
 
 static VALUE
-vm_call_cfunc_with_frame(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc)
+vm_call_cfunc_with_frame(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, const rb_callable_method_entry_t *me)
 {
     VALUE val;
-    const rb_callable_method_entry_t *me = cc->me;
     const rb_method_cfunc_t *cfunc = vm_method_cfunc_entry(me);
     int len = cfunc->argc;
 
@@ -1938,7 +1937,7 @@ static VALUE
 vm_call_cfunc(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, struct rb_calling_info *calling, const struct rb_call_info *ci, struct rb_call_cache *cc)
 {
     CALLER_SETUP_ARG(reg_cfp, calling, ci);
-    return vm_call_cfunc_with_frame(ec, reg_cfp, calling, ci, cc);
+    return vm_call_cfunc_with_frame(ec, reg_cfp, calling, ci, cc->me);
 }
 
 static VALUE

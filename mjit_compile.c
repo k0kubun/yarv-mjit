@@ -52,14 +52,38 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
     }
 }
 
-/* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`. */
+static int
+inlinable_cfunc_p(CALL_CACHE cc)
+{
+    return GET_GLOBAL_METHOD_STATE() == cc->method_state
+	&& mjit_valid_class_serial_p(cc->class_serial)
+	&& cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
+}
+
+/* Compiles vm_search_method and CALL_METHOD macro to f. `calling` should be already defined in `f`. */
 static void
 fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 {
+    CALL_CACHE cc = (CALL_CACHE)cc_v;
+
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
-    fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+    /* Compile vm_search_method and CALL_METHOD. Method setup is inlined if possible. */
+    if (inlinable_cfunc_p(cc)) {
+	/* Inline vm_call_cfunc FASTPATH */
+	fprintf(f, "      if (GET_GLOBAL_METHOD_STATE() == %llu && RCLASS_SERIAL(CLASS_OF(calling.recv)) == %llu) {\n", cc->method_state, cc->class_serial);
+	fprintf(f, "        CALLER_SETUP_ARG(cfp, &calling, (CALL_INFO)0x%"PRIxVALUE");\n", ci_v);
+	fprintf(f, "        v = vm_call_cfunc_with_frame(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", ci_v, (VALUE)cc->me);
+	fprintf(f, "      } else {\n");
+	fprintf(f, "        vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
+	fprintf(f, "        v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+	fprintf(f, "      }\n");
+    }
+    else {
+	fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
+	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+    }
 
     fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n");
     fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
@@ -90,7 +114,6 @@ compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, 
     }
     fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
     fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
-    fprintf(f, "    vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", operands[0], operands[1]);
     fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
     fprintf(f, "  }\n");
     return -argc;
@@ -126,7 +149,7 @@ fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int res
     /* CALL_SIMPLE_METHOD */
     fprintf(f, "      calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
     fprintf(f, "      calling.argc = %d;\n", argc - 1); /* -1 is recv */
-    fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = recv);\n", ci, cc);
+    fprintf(f, "      calling.recv = recv;\n");
     fprint_call_method(f, ci, cc, result_pos);
     fprintf(f, "    } else {\n");
     fprintf(f, "      stack[%d] = result;\n", result_pos);
