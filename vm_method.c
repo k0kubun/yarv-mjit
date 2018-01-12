@@ -62,6 +62,7 @@ static struct {
 static void
 rb_class_clear_method_cache(VALUE klass, VALUE arg)
 {
+    mjit_remove_class_serial(RCLASS_SERIAL(klass));
     RCLASS_SERIAL(klass) = rb_next_class_serial();
 
     if (RB_TYPE_P(klass, T_ICLASS)) {

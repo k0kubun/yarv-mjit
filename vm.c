@@ -317,7 +317,9 @@ static VALUE rb_block_param_proxy;
 rb_serial_t
 rb_next_class_serial(void)
 {
-    return NEXT_CLASS_SERIAL();
+    rb_serial_t class_serial = NEXT_CLASS_SERIAL();
+    mjit_add_class_serial(class_serial);
+    return class_serial;
 }
 
 VALUE rb_cRubyVM;
