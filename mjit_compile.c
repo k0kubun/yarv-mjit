@@ -52,14 +52,6 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
     }
 }
 
-static int
-inlinable_cfunc_p(CALL_CACHE cc)
-{
-    return GET_GLOBAL_METHOD_STATE() == cc->method_state
-	&& mjit_valid_class_serial_p(cc->class_serial)
-	&& cc->me && cc->me->def->type == VM_METHOD_TYPE_CFUNC;
-}
-
 /* Returns iseq from cc if it's available and still not obsoleted. */
 static const rb_iseq_t *
 get_iseq_if_available(CALL_CACHE cc)
@@ -87,13 +79,6 @@ inlinable_iseq_p(CALL_INFO ci, CALL_CACHE cc, const rb_iseq_t *iseq)
 	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)); /* CI_SET_FASTPATH */
 }
 
-static void
-fprint_call_method_without_inline(FILE *f, VALUE ci_v, VALUE cc_v)
-{
-    fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
-    fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
-}
-
 /* Compiles vm_search_method and CALL_METHOD macro to f. `calling` should be already defined in `f`. */
 static void
 fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
@@ -105,32 +90,20 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
     fprintf(f, "      VALUE v;\n");
 
     /* Compile vm_search_method and CALL_METHOD. Method setup is inlined if possible. */
-    if (inlinable_cfunc_p(cc)) {
-	/* Inline vm_call_cfunc FASTPATH */
-	fprintf(f, "      if (GET_GLOBAL_METHOD_STATE() == %llu && RCLASS_SERIAL(CLASS_OF(calling.recv)) == %llu) {\n", cc->method_state, cc->class_serial);
-	fprintf(f, "        CALLER_SETUP_ARG(cfp, &calling, (CALL_INFO)0x%"PRIxVALUE");\n", ci_v);
-	fprintf(f, "        v = vm_call_cfunc_with_frame(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", ci_v, (VALUE)cc->me);
-	fprintf(f, "      } else {\n");
-	fprint_call_method_without_inline(f, ci_v, cc_v);
-	fprintf(f, "      }\n");
-    }
-    else if (inlinable_iseq_p((CALL_INFO)ci_v, cc, iseq = get_iseq_if_available(cc))) {
+    if (inlinable_iseq_p((CALL_INFO)ci_v, cc, iseq = get_iseq_if_available(cc))) {
 	/* Inline vm_call_iseq_setup_normal for vm_call_iseq_setup_func FASTPATH */
 	int param_size = iseq->body->param.size; /* TODO: check calling->argc for argument_arity_error */
 
-	fprintf(f, "      if (GET_GLOBAL_METHOD_STATE() == %llu && RCLASS_SERIAL(CLASS_OF(calling.recv)) == %llu) {\n", cc->method_state, cc->class_serial);
-	fprintf(f, "        VALUE *argv = cfp->sp - calling.argc;\n");
-	fprintf(f, "        cfp->sp = argv - 1;\n"); /* recv */
-	fprintf(f, "        vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
+	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
+	fprintf(f, "      cfp->sp = argv - 1;\n"); /* recv */
+	fprintf(f, "      vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
 		"calling.block_handler, 0x%"PRIxVALUE", 0x%"PRIxVALUE", argv + %d, %d, %d);\n",
 		(VALUE)iseq, (VALUE)cc->me, (VALUE)iseq->body->iseq_encoded, param_size, iseq->body->local_table_size - param_size, iseq->body->stack_max);
-	fprintf(f, "        v = Qundef;\n");
-	fprintf(f, "      } else {\n");
-	fprint_call_method_without_inline(f, ci_v, cc_v);
-	fprintf(f, "      }\n");
+	fprintf(f, "      v = Qundef;\n");
     }
     else {
-	fprint_call_method_without_inline(f, ci_v, cc_v);
+	fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
+	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
     }
 
     fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n");
@@ -147,9 +120,17 @@ static int
 compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, int with_block)
 {
     CALL_INFO ci = (CALL_INFO)operands[0];
+    CALL_CACHE cc = (CALL_CACHE)operands[1];
     unsigned int argc = ci->orig_argc; /* unlike `ci->orig_argc`, `argc` may include blockarg */
     if (with_block) {
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+    }
+
+    if (inlinable_iseq_p(ci, cc, get_iseq_if_available(cc))) {
+	fprintf(f, "  if (UNLIKELY(GET_GLOBAL_METHOD_STATE() != %llu || RCLASS_SERIAL(CLASS_OF(stack[%d])) != %llu)) {\n", cc->method_state, stack_size - 1 - argc, cc->class_serial);
+	fprintf(f, "    cfp->pc -= %d;\n", insn_len(insn));
+	fprintf(f, "    return Qundef; /* cancel JIT */\n");
+	fprintf(f, "  }\n");
     }
 
     fprintf(f, "  {\n");
