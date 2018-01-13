@@ -121,19 +121,20 @@ static const rb_code_location_t NULL_LOC = { {0, -1}, {0, -1} };
 # define SHOW_BITSTACK(stack, name) (yydebug ? rb_parser_show_bitstack(parser, stack, name, __LINE__) : (void)0)
 # define BITSTACK_PUSH(stack, n) (((stack) = ((stack)<<1)|((n)&1)), SHOW_BITSTACK(stack, #stack"(push)"))
 # define BITSTACK_POP(stack)	 (((stack) = (stack) >> 1), SHOW_BITSTACK(stack, #stack"(pop)"))
-# define BITSTACK_LEXPOP(stack)	 (((stack) = ((stack) >> 1) | ((stack) & 1)), SHOW_BITSTACK(stack, #stack"(lexpop)"))
 # define BITSTACK_SET_P(stack)	 (SHOW_BITSTACK(stack, #stack), (stack)&1)
 # define BITSTACK_SET(stack, n)	 ((stack)=(n), SHOW_BITSTACK(stack, #stack"(set)"))
 
+/* A flag to identify keyword_do_cond, "do" keyword after condition expression.
+   Examples: `while ... do`, `until ... do`, and `for ... in ... do` */
 #define COND_PUSH(n)	BITSTACK_PUSH(cond_stack, (n))
 #define COND_POP()	BITSTACK_POP(cond_stack)
-#define COND_LEXPOP()	BITSTACK_LEXPOP(cond_stack)
 #define COND_P()	BITSTACK_SET_P(cond_stack)
 #define COND_SET(n)	BITSTACK_SET(cond_stack, (n))
 
+/* A flag to identify keyword_do_block; "do" keyword after command_call.
+   Example: `foo 1, 2 do`. */
 #define CMDARG_PUSH(n)	BITSTACK_PUSH(cmdarg_stack, (n))
 #define CMDARG_POP()	BITSTACK_POP(cmdarg_stack)
-#define CMDARG_LEXPOP()	BITSTACK_LEXPOP(cmdarg_stack)
 #define CMDARG_P()	BITSTACK_SET_P(cmdarg_stack)
 #define CMDARG_SET(n)	BITSTACK_SET(cmdarg_stack, (n))
 
@@ -157,8 +158,7 @@ struct local_vars {
 
 #define DVARS_INHERIT ((void*)1)
 #define DVARS_TOPSCOPE NULL
-#define DVARS_SPECIAL_P(tbl) (!POINTER_P(tbl))
-#define POINTER_P(val) ((VALUE)(val) & ~(VALUE)3)
+#define DVARS_TERMINAL_P(tbl) ((tbl) == DVARS_INHERIT || (tbl) == DVARS_TOPSCOPE)
 
 typedef struct token_info {
     const char *token;
@@ -197,8 +197,11 @@ struct parser_params {
 	const char *ptok;
 	long gets_ptr;
 	enum lex_state_e state;
+	/* track the nest level of any parens "()[]{}" */
 	int paren_nest;
+	/* keep paren_nest at the beginning of lambda "->" to detect tLAMBEG and keyword_do_LAMBDA */
 	int lpar_beg;
+	/* track the nest level of only braces "{}" */
 	int brace_nest;
     } lex;
     stack_type cond_stack;
@@ -339,7 +342,7 @@ static int parser_yyerror(struct parser_params*, const YYLTYPE *yylloc, const ch
 #define NODE_CALL_Q(q) (CALL_Q_P(q) ? NODE_QCALL : NODE_CALL)
 #define NEW_QCALL(q,r,m,a,loc) NEW_NODE(NODE_CALL_Q(q),r,m,a,loc)
 
-#define lambda_beginning_p() (lpar_beg && lpar_beg == paren_nest)
+#define lambda_beginning_p() (lpar_beg == paren_nest)
 
 static enum yytokentype yylex(YYSTYPE*, YYLTYPE*, struct parser_params*);
 
@@ -918,10 +921,10 @@ PRINTF_ARGS(static void parser_compile_error(struct parser_params*, const char *
 #endif
 #endif
 
-static void token_info_push_gen(struct parser_params*, const char *token, size_t len);
-static void token_info_pop_gen(struct parser_params*, const char *token, size_t len);
-#define token_info_push(token) token_info_push_gen(parser, (token), rb_strlen_lit(token))
-#define token_info_pop(token) token_info_pop_gen(parser, (token), rb_strlen_lit(token))
+static void token_info_push_gen(struct parser_params*, const char *token, const rb_code_location_t *loc);
+static void token_info_pop_gen(struct parser_params*, const char *token, const rb_code_location_t *loc);
+#define token_info_push(token, loc) token_info_push_gen(parser, (token), (loc))
+#define token_info_pop(token, loc) token_info_pop_gen(parser, (token), (loc))
 %}
 
 %pure-parser
@@ -1094,7 +1097,7 @@ static void token_info_pop_gen(struct parser_params*, const char *token, size_t 
 program		:  {
 			SET_LEX_STATE(EXPR_BEG);
 		    /*%%%*/
-			local_push(compile_for_eval || in_main);
+			local_push(1);
 		    /*%
 			local_push(0);
 		    %*/
@@ -2411,8 +2414,22 @@ call_args	: command
 		;
 
 command_args	:   {
+			/* If call_args starts with a open paren '(' or '[',
+			 * look-ahead reading of the letters calls CMDARG_PUSH(0),
+			 * but the push must be done after CMDARG_PUSH(1).
+			 * So this code makes them consistent by first cancelling
+			 * the premature CMDARG_PUSH(0), doing CMDARG_PUSH(1),
+			 * and finally redoing CMDARG_PUSH(0).
+			 */
+			int lookahead = 0;
+			switch (yychar) {
+			  case '(': case tLPAREN: case tLPAREN_ARG: case '[': case tLBRACK:
+			    lookahead = 1;
+			}
+			if (lookahead) CMDARG_POP();
 			$<val>$ = cmdarg_stack;
 			CMDARG_PUSH(1);
+			if (lookahead) CMDARG_PUSH(0);
 		    }
 		  call_args
 		    {
@@ -2698,9 +2715,13 @@ primary		: literal
 			$$ = method_add_block($1, $2, &@$);
 		    %*/
 		    }
-		| tLAMBDA lambda
+		| tLAMBDA
 		    {
-			$$ = $2;
+			token_info_push("->", &@1);
+		    }
+		  lambda
+		    {
+			$$ = $3;
 		    }
 		| k_if expr_value then
 		  compstmt
@@ -2991,67 +3012,67 @@ primary_value	: primary
 
 k_begin		: keyword_begin
 		    {
-			token_info_push("begin");
+			token_info_push("begin", &@$);
 		    }
 		;
 
 k_if		: keyword_if
 		    {
-			token_info_push("if");
+			token_info_push("if", &@$);
 		    }
 		;
 
 k_unless	: keyword_unless
 		    {
-			token_info_push("unless");
+			token_info_push("unless", &@$);
 		    }
 		;
 
 k_while		: keyword_while
 		    {
-			token_info_push("while");
+			token_info_push("while", &@$);
 		    }
 		;
 
 k_until		: keyword_until
 		    {
-			token_info_push("until");
+			token_info_push("until", &@$);
 		    }
 		;
 
 k_case		: keyword_case
 		    {
-			token_info_push("case");
+			token_info_push("case", &@$);
 		    }
 		;
 
 k_for		: keyword_for
 		    {
-			token_info_push("for");
+			token_info_push("for", &@$);
 		    }
 		;
 
 k_class		: keyword_class
 		    {
-			token_info_push("class");
+			token_info_push("class", &@$);
 		    }
 		;
 
 k_module	: keyword_module
 		    {
-			token_info_push("module");
+			token_info_push("module", &@$);
 		    }
 		;
 
 k_def		: keyword_def
 		    {
-			token_info_push("def");
+			token_info_push("def", &@$);
 		    }
 		;
 
 k_end		: keyword_end
 		    {
-			token_info_pop("end");
+			token_info_pop("end", &@$);
 		    }
 		;
 
@@ -3411,7 +3432,7 @@ lambda		:   {
 		    }
 		    {
 			$<num>$ = lpar_beg;
-			lpar_beg = ++paren_nest;
+			lpar_beg = paren_nest;
 		    }
 		  f_larglist
 		    {
@@ -3422,7 +3443,7 @@ lambda		:   {
 		    {
 			lpar_beg = $<num>2;
 			CMDARG_SET($<val>4);
-			CMDARG_LEXPOP();
+			CMDARG_POP();
 		    /*%%%*/
 			$$ = NEW_LAMBDA($3, $5, &@$);
 			nd_set_line($$->nd_body, @5.end_pos.lineno);
@@ -3450,7 +3471,7 @@ f_larglist	: '(' f_args opt_bv_decl ')'
 
 lambda_body	: tLAMBEG compstmt '}'
 		    {
-			token_info_pop("}");
+			token_info_pop("}", &@3);
 			$$ = $2;
 		    }
 		| keyword_do_LAMBDA bodystmt k_end
@@ -5021,69 +5042,58 @@ ripper_dispatch_delayed_token(struct parser_params *parser, int t)
 
 #define parser_isascii() ISASCII(*(lex_p-1))
 
-static int
-token_info_get_column(struct parser_params *parser, const char *pend)
+static void
+setup_token_info(token_info *ptinfo, const char *p, const rb_code_location_t *loc)
 {
-    int column = 1;
-    const char *p;
-    for (p = lex_pbeg; p < pend; p++) {
+    int column = 1, nonspc = 0, i;
+    for (i = 0; i < loc->beg_pos.column; i++, p++) {
 	if (*p == '\t') {
 	    column = (((column - 1) / TAB_WIDTH) + 1) * TAB_WIDTH;
 	}
 	column++;
-    }
-    return column;
-}
-
-static int
-token_info_has_nonspaces(struct parser_params *parser, const char *pend)
-{
-    const char *p;
-    for (p = lex_pbeg; p < pend; p++) {
 	if (*p != ' ' && *p != '\t') {
-	    return 1;
+	    nonspc = 1;
 	}
     }
-    return 0;
+
+    ptinfo->linenum = loc->beg_pos.lineno;
+    ptinfo->column = column;
+    ptinfo->nonspc = nonspc;
 }
 
 static void
-token_info_push_gen(struct parser_params *parser, const char *token, size_t len)
+token_info_push_gen(struct parser_params *parser, const char *token, const rb_code_location_t *loc)
 {
     token_info *ptinfo;
-    const char *t = lex_p - len;
 
     if (!parser->token_info_enabled) return;
     ptinfo = ALLOC(token_info);
     ptinfo->token = token;
-    ptinfo->linenum = ruby_sourceline;
-    ptinfo->column = token_info_get_column(parser, t);
-    ptinfo->nonspc = token_info_has_nonspaces(parser, t);
     ptinfo->next = parser->token_info;
+    setup_token_info(ptinfo, lex_pbeg, loc);
 
     parser->token_info = ptinfo;
 }
 
 static void
-token_info_pop_gen(struct parser_params *parser, const char *token, size_t len)
+token_info_pop_gen(struct parser_params *parser, const char *token, const rb_code_location_t *loc)
 {
-    int linenum;
-    token_info *ptinfo = parser->token_info;
-    const char *t = lex_p - len;
+    token_info *ptinfo_beg = parser->token_info, ptinfo_end_body, *ptinfo_end = &ptinfo_end_body;
+    setup_token_info(ptinfo_end, lex_pbeg, loc);
 
-    if (!ptinfo) return;
-    parser->token_info = ptinfo->next;
-    linenum = ruby_sourceline;
-    if (parser->token_info_enabled &&
-	linenum != ptinfo->linenum && !ptinfo->nonspc &&
-	!token_info_has_nonspaces(parser, t) &&
-	token_info_get_column(parser, t) != ptinfo->column) {
-	rb_warn3L(linenum,
-		  "mismatched indentations at '%s' with '%s' at %d",
-		  WARN_S(token), WARN_S(ptinfo->token), WARN_I(ptinfo->linenum));
-    }
+    if (!ptinfo_beg) return;
+    parser->token_info = ptinfo_beg->next;
 
-    xfree(ptinfo);
+    /* indentation check of matched keywords (begin..end, if..end, etc.) */
+    if (!parser->token_info_enabled) goto ok; /* the check is off */
+    if (ptinfo_beg->linenum == ptinfo_end->linenum) goto ok; /* ignore one-line block */
+    if (ptinfo_beg->nonspc || ptinfo_end->nonspc) goto ok; /* ignore keyword in the middle of a line */
+    if (ptinfo_beg->column == ptinfo_end->column) goto ok; /* the indents are matched */
+    rb_warn3L(ptinfo_end->linenum,
+	      "mismatched indentations at '%s' with '%s' at %d",
+	      WARN_S(token), WARN_S(ptinfo_beg->token), WARN_I(ptinfo_beg->linenum));
+ok:
+    xfree(ptinfo_beg);
 }
 
 static int
@@ -5209,7 +5219,7 @@ parser_yyerror(struct parser_params *parser, const YYLTYPE *yylloc, const char *
 static int
 vtable_size(const struct vtable *tbl)
 {
-    if (POINTER_P(tbl)) {
+    if (!DVARS_TERMINAL_P(tbl)) {
 	return tbl->pos;
     }
     else {
@@ -5243,7 +5253,7 @@ vtable_free_gen(struct parser_params *parser, int line, const char *name,
 	rb_parser_printf(parser, "vtable_free:%d: %s(%p)\n", line, name, tbl);
     }
 #endif
-    if (POINTER_P(tbl)) {
+    if (!DVARS_TERMINAL_P(tbl)) {
 	if (tbl->tbl) {
 	    xfree(tbl->tbl);
 	}
@@ -5262,7 +5272,7 @@ vtable_add_gen(struct parser_params *parser, int line, const char *name,
 			 line, name, tbl, rb_id2name(id));
     }
 #endif
-    if (!POINTER_P(tbl)) {
+    if (DVARS_TERMINAL_P(tbl)) {
 	rb_parser_fatal(parser, "vtable_add: vtable is not allocated (%p)", (void *)tbl);
 	return;
     }
@@ -5297,7 +5307,7 @@ vtable_included(const struct vtable * tbl, ID id)
 {
     int i;
 
-    if (POINTER_P(tbl)) {
+    if (!DVARS_TERMINAL_P(tbl)) {
 	for (i = 0; i < tbl->pos; i++) {
 	    if (tbl->tbl[i] == id) {
 		return i+1;
@@ -7987,8 +7997,7 @@ parse_ident(struct parser_params *parser, int c, int cmd_state)
 	    }
 	    if (kw->id[0] == keyword_do) {
 		if (lambda_beginning_p()) {
-		    lpar_beg = 0;
-		    --paren_nest;
+		    lpar_beg = -1; /* make lambda_beginning_p() == FALSE in the body of "-> do ... end" */
 		    return keyword_do_LAMBDA;
 		}
 		if (COND_P()) return keyword_do_cond;
@@ -8446,7 +8455,6 @@ parser_yylex(struct parser_params *parser)
 	}
 	if (c == '>') {
 	    SET_LEX_STATE(EXPR_ENDFN);
-	    token_info_push("->");
 	    return tLAMBDA;
 	}
 	if (IS_BEG() || (IS_SPCARG(c) && arg_ambiguous('-'))) {
@@ -8482,18 +8490,25 @@ parser_yylex(struct parser_params *parser)
 	return parse_numeric(parser, c);
 
       case ')':
-      case ']':
+	COND_POP();
+	CMDARG_POP();
+	SET_LEX_STATE(EXPR_ENDFN);
 	paren_nest--;
+	return c;
+
+      case ']':
+	COND_POP();
+	CMDARG_POP();
+	SET_LEX_STATE(EXPR_END);
+	paren_nest--;
+	return c;
+
       case '}':
-	COND_LEXPOP();
-	CMDARG_LEXPOP();
-	if (c == ')')
-	    SET_LEX_STATE(EXPR_ENDFN);
-	else
-	    SET_LEX_STATE(EXPR_END);
-	if (c == '}') {
-	    if (!brace_nest--) c = tSTRING_DEND;
-	}
+	COND_POP();
+	CMDARG_POP();
+	SET_LEX_STATE(EXPR_END);
+	if (!brace_nest--) return tSTRING_DEND;
+	paren_nest--;
 	return c;
 
       case ':':
@@ -8626,12 +8641,12 @@ parser_yylex(struct parser_params *parser)
 	++brace_nest;
 	if (lambda_beginning_p()) {
 	    SET_LEX_STATE(EXPR_BEG);
-	    lpar_beg = 0;
-	    --paren_nest;
 	    COND_PUSH(0);
 	    CMDARG_PUSH(0);
+	    paren_nest++;
 	    return tLAMBEG;
 	}
+	paren_nest++;
 	if (IS_lex_state(EXPR_LABELED))
 	    c = tLBRACE;      /* hash */
 	else if (IS_lex_state(EXPR_ARG_ANY | EXPR_END | EXPR_ENDFN))
@@ -9448,13 +9463,8 @@ rb_parser_fatal(struct parser_params *parser, const char *fmt, ...)
     va_start(ap, fmt);
     rb_str_vcatf(mesg, fmt, ap);
     va_end(ap);
-#ifndef RIPPER
     parser_yyerror(parser, NULL, RSTRING_PTR(mesg));
     RB_GC_GUARD(mesg);
-#else
-    dispatch1(parse_error, mesg);
-    ripper_error();
-#endif /* !RIPPER */
 
     mesg = rb_str_new(0, 0);
     append_lex_state_name(lex_state, mesg);
@@ -10641,17 +10651,22 @@ warn_unused_var(struct parser_params *parser, struct local_vars *local)
 }
 
 static void
-local_push_gen(struct parser_params *parser, int inherit_dvars)
+local_push_gen(struct parser_params *parser, int toplevel_scope)
 {
     struct local_vars *local;
+    int inherits_dvars = toplevel_scope && (compile_for_eval || in_main /* is in_main really needed? */);
+    int warn_unused_vars = RTEST(ruby_verbose);
 
     local = ALLOC(struct local_vars);
     local->prev = lvtbl;
     local->args = vtable_alloc(0);
-    local->vars = vtable_alloc(inherit_dvars ? DVARS_INHERIT : DVARS_TOPSCOPE);
-    local->used = !(inherit_dvars &&
-		    (ifndef_ripper(compile_for_eval || e_option_supplied(parser))+0)) &&
-	RTEST(ruby_verbose) ? vtable_alloc(0) : 0;
+    local->vars = vtable_alloc(inherits_dvars ? DVARS_INHERIT : DVARS_TOPSCOPE);
+#ifndef RIPPER
+    if (toplevel_scope && compile_for_eval) warn_unused_vars = 0;
+    if (toplevel_scope && e_option_supplied(parser)) warn_unused_vars = 0;
+#endif
+    local->used = warn_unused_vars ? vtable_alloc(0) : 0;
+
 # if WARN_PAST_SCOPE
     local->past = 0;
 # endif
@@ -10738,7 +10753,7 @@ local_id_gen(struct parser_params *parser, ID id, ID **vidrefp)
     args = lvtbl->args;
     used = lvtbl->used;
 
-    while (vars && POINTER_P(vars->prev)) {
+    while (vars && !DVARS_TERMINAL_P(vars->prev)) {
 	vars = vars->prev;
 	args = args->prev;
 	if (used) used = used->prev;
@@ -10814,7 +10829,7 @@ dyna_pop_gen(struct parser_params *parser, const struct vtable *lvargs)
 static int
 dyna_in_block_gen(struct parser_params *parser)
 {
-    return POINTER_P(lvtbl->vars) && lvtbl->vars->prev != DVARS_TOPSCOPE;
+    return !DVARS_TERMINAL_P(lvtbl->vars) && lvtbl->vars->prev != DVARS_TOPSCOPE;
 }
 
 static int
@@ -10827,7 +10842,7 @@ dvar_defined_gen(struct parser_params *parser, ID id, ID **vidrefp)
     vars = lvtbl->vars;
     used = lvtbl->used;
 
-    while (POINTER_P(vars)) {
+    while (!DVARS_TERMINAL_P(vars)) {
 	if (vtable_included(args, id)) {
 	    return 1;
 	}
@@ -11089,6 +11104,7 @@ parser_initialize(struct parser_params *parser)
     /* note: we rely on TypedData_Make_Struct to set most fields to 0 */
     command_start = TRUE;
     ruby_sourcefile_string = Qnil;
+    lpar_beg = -1; /* make lambda_beginning_p() == FALSE at first */
 #ifdef RIPPER
     parser->delayed = Qnil;
     parser->result = Qnil;

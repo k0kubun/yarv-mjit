@@ -745,22 +745,22 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case BIN(answer):
 	fprintf(f, "  stack[%d] = INT2FIX(42);\n", b->stack_size++);
 	break;
-      case BIN(getlocal_OP__WC__0):
+      case BIN(getlocal_WC_0):
 	fprint_getlocal(f, b->stack_size++, operands[0], 0);
 	break;
-      case BIN(getlocal_OP__WC__1):
+      case BIN(getlocal_WC_1):
 	fprint_getlocal(f, b->stack_size++, operands[0], 1);
 	break;
-      case BIN(setlocal_OP__WC__0):
+      case BIN(setlocal_WC_0):
 	fprint_setlocal(f, --b->stack_size, operands[0], 0);
 	break;
-      case BIN(setlocal_OP__WC__1):
+      case BIN(setlocal_WC_1):
 	fprint_setlocal(f, --b->stack_size, operands[0], 1);
 	break;
-      case BIN(putobject_OP_INT2FIX_O_0_C_):
+      case BIN(putobject_INT2FIX_0_):
 	fprintf(f, "  stack[%d] = INT2FIX(0);\n", b->stack_size++);
 	break;
-      case BIN(putobject_OP_INT2FIX_O_1_C_):
+      case BIN(putobject_INT2FIX_1_):
 	fprintf(f, "  stack[%d] = INT2FIX(1);\n", b->stack_size++);
 	break;
       default:

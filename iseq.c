@@ -210,7 +210,7 @@ iseq_memsize(const rb_iseq_t *iseq)
 
 	cur = compile_data->storage_head;
 	while (cur) {
-	    size += cur->size + SIZEOF_ISEQ_COMPILE_DATA_STORAGE;
+	    size += cur->size + sizeof(struct iseq_compile_data_storage);
 	    cur = cur->next;
 	}
     }
@@ -335,7 +335,7 @@ prepare_iseq_build(rb_iseq_t *iseq,
     ISEQ_COMPILE_DATA(iseq)->storage_head = ISEQ_COMPILE_DATA(iseq)->storage_current =
       (struct iseq_compile_data_storage *)
 	ALLOC_N(char, INITIAL_ISEQ_COMPILE_DATA_STORAGE_BUFF_SIZE +
-		SIZEOF_ISEQ_COMPILE_DATA_STORAGE);
+		sizeof(struct iseq_compile_data_storage));
 
     RB_OBJ_WRITE(iseq, &ISEQ_COMPILE_DATA(iseq)->catch_table_ary, rb_ary_tmp_new(3));
     ISEQ_COMPILE_DATA(iseq)->storage_head->pos = 0;
@@ -1782,8 +1782,8 @@ iseq_inspect(const rb_iseq_t *iseq)
 	return rb_sprintf("#<ISeq: uninitialized>");
     }
     else {
-	return rb_sprintf("#<ISeq:%s@%s:%d (%d,%d)-(%d,%d)>",
-			  RSTRING_PTR(iseq->body->location.label), RSTRING_PTR(rb_iseq_path(iseq)),
+	return rb_sprintf("#<ISeq:%"PRIsVALUE"@%"PRIsVALUE":%d (%d,%d)-(%d,%d)>",
+			  iseq->body->location.label, rb_iseq_path(iseq),
 			  iseq->body->location.code_location.beg_pos.lineno,
 			  iseq->body->location.code_location.beg_pos.lineno,
 			  iseq->body->location.code_location.beg_pos.column,
@@ -2838,7 +2838,7 @@ struct succ_index_table {
 	unsigned int rank;
 	uint64_t small_block_ranks; /* 9 bits * 7 = 63 bits */
 	uint64_t bits[512/64];
-    } succ_part[];
+    } succ_part[FLEX_ARY_LEN];
 } succ_index_table;
 
 #define imm_block_rank_set(v, i, r) (v) |= (uint64_t)(r) << (7 * (i))

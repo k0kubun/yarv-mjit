@@ -15,7 +15,6 @@
 #include "encindex.h"
 #include <math.h>
 
-#define USE_INSN_STACK_INCREASE 1
 #include "vm_core.h"
 #include "vm_debug.h"
 #include "iseq.h"
@@ -869,7 +868,7 @@ compile_data_alloc(rb_iseq_t *iseq, size_t size)
 	    alloc_size *= 2;
 	}
 	storage->next = (void *)ALLOC_N(char, alloc_size +
-					SIZEOF_ISEQ_COMPILE_DATA_STORAGE);
+					sizeof(struct iseq_compile_data_storage));
 	storage = ISEQ_COMPILE_DATA(iseq)->storage_current = storage->next;
 	storage->next = 0;
 	storage->pos = 0;
@@ -7373,16 +7372,16 @@ dump_disasm_list_with_cursor(const LINK_ELEMENT *link, const LINK_ELEMENT *curr,
 const char *
 rb_insns_name(int i)
 {
-    return insn_name_info[i];
+    return insn_name(i);
 }
 
 VALUE
 rb_insns_name_array(void)
 {
-    VALUE ary = rb_ary_new();
+    VALUE ary = rb_ary_new_capa(VM_INSTRUCTION_SIZE);
     int i;
     for (i = 0; i < VM_INSTRUCTION_SIZE; i++) {
-	rb_ary_push(ary, rb_fstring_cstr(insn_name_info[i]));
+	rb_ary_push(ary, rb_fstring_cstr(insn_name(i)));
     }
     return rb_obj_freeze(ary);
 }
@@ -8065,19 +8064,6 @@ struct ibf_header {
     ibf_offset_t iseq_list_offset;
     ibf_offset_t id_list_offset;
     ibf_offset_t object_list_offset;
-};
-
-struct ibf_id_entry {
-    enum {
-	ibf_id_enc_ascii,
-	ibf_id_enc_utf8,
-	ibf_id_enc_other
-    } enc
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)
-    : 2
-#endif
-    ;
-    char body[1];
 };
 
 struct ibf_dump {
@@ -8800,7 +8786,7 @@ enum ibf_object_class_index {
 struct ibf_object_string {
     long encindex;
     long len;
-    char ptr[1];
+    char ptr[FLEX_ARY_LEN];
 };
 
 struct ibf_object_regexp {
@@ -8810,12 +8796,12 @@ struct ibf_object_regexp {
 
 struct ibf_object_array {
     long len;
-    long ary[1];
+    long ary[FLEX_ARY_LEN];
 };
 
 struct ibf_object_hash {
     long len;
-    long keyval[1];
+    long keyval[FLEX_ARY_LEN];
 };
 
 struct ibf_object_struct_range {
@@ -8828,7 +8814,7 @@ struct ibf_object_struct_range {
 
 struct ibf_object_bignum {
     ssize_t slen;
-    BDIGIT digits[1];
+    BDIGIT digits[FLEX_ARY_LEN];
 };
 
 enum ibf_object_data_type {
