@@ -81,7 +81,7 @@ inlinable_iseq_p(CALL_INFO ci, CALL_CACHE cc, const rb_iseq_t *iseq)
 
 /* Compiles vm_search_method and CALL_METHOD macro to f. `calling` should be already defined in `f`. */
 static void
-fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
+fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos, int inline_p)
 {
     const rb_iseq_t *iseq;
     CALL_CACHE cc = (CALL_CACHE)cc_v;
@@ -89,21 +89,16 @@ fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
-    if (inlinable_iseq_p((CALL_INFO)ci_v, cc, iseq = get_iseq_if_available(cc))) {
+    if (inline_p && inlinable_iseq_p((CALL_INFO)ci_v, cc, iseq = get_iseq_if_available(cc))) {
 	/* Inline vm_call_iseq_setup_normal for vm_call_iseq_setup_func FASTPATH */
 	int param_size = iseq->body->param.size; /* TODO: check calling->argc for argument_arity_error */
 
-	fprintf(f, "      if (GET_GLOBAL_METHOD_STATE() == %llu && RCLASS_SERIAL(CLASS_OF(calling.recv)) == %llu) {\n", cc->method_state, cc->class_serial);
-	fprintf(f, "        VALUE *argv = cfp->sp - calling.argc;\n");
-	fprintf(f, "        cfp->sp = argv - 1;\n"); /* recv */
-	fprintf(f, "        vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
+	fprintf(f, "      VALUE *argv = cfp->sp - calling.argc;\n");
+	fprintf(f, "      cfp->sp = argv - 1;\n"); /* recv */
+	fprintf(f, "      vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
 		"calling.block_handler, 0x%"PRIxVALUE", 0x%"PRIxVALUE", argv + %d, %d, %d);\n",
 		(VALUE)iseq, (VALUE)cc->me, (VALUE)iseq->body->iseq_encoded, param_size, iseq->body->local_table_size - param_size, iseq->body->stack_max);
-	fprintf(f, "        v = Qundef;\n");
-	fprintf(f, "      } else {\n");
-	fprintf(f, "        vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
-	fprintf(f, "        v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
-	fprintf(f, "      }\n");
+	fprintf(f, "      v = Qundef;\n");
     }
     else {
 	fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
@@ -124,9 +119,18 @@ static int
 compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, int with_block)
 {
     CALL_INFO ci = (CALL_INFO)operands[0];
+    CALL_CACHE cc = (CALL_CACHE)operands[1];
     unsigned int argc = ci->orig_argc; /* unlike `ci->orig_argc`, `argc` may include blockarg */
     if (with_block) {
 	argc += ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0);
+    }
+
+    /* Allows to skip `vm_search_method` and inline cc->call equivalent. This is required to enable `inline_p`. */
+    if (inlinable_iseq_p(ci, cc, get_iseq_if_available(cc))) {
+	fprintf(f, "  if (UNLIKELY(GET_GLOBAL_METHOD_STATE() != %llu || RCLASS_SERIAL(CLASS_OF(stack[%d])) != %llu)) {\n", cc->method_state, stack_size - 1 - argc, cc->class_serial);
+	fprintf(f, "    cfp->pc -= %d;\n", insn_len(insn));
+	fprintf(f, "    return Qundef; /* cancel JIT */\n");
+	fprintf(f, "  }\n");
     }
 
     fprintf(f, "  {\n");
@@ -139,7 +143,7 @@ compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, 
     }
     fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
     fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
-    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
+    fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1, TRUE);
     fprintf(f, "  }\n");
     return -argc;
 }
@@ -175,7 +179,7 @@ fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int res
     fprintf(f, "      calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
     fprintf(f, "      calling.argc = %d;\n", argc - 1); /* -1 is recv */
     fprintf(f, "      calling.recv = recv;\n");
-    fprint_call_method(f, ci, cc, result_pos);
+    fprint_call_method(f, ci, cc, result_pos, FALSE);
     fprintf(f, "    } else {\n");
     fprintf(f, "      stack[%d] = result;\n", result_pos);
     fprintf(f, "    }\n");
