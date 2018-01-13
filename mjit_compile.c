@@ -52,14 +52,63 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
     }
 }
 
-/* Compiles CALL_METHOD macro to f. `calling` should be already defined in `f`. */
+/* Returns iseq from cc if it's available and still not obsoleted. */
+static const rb_iseq_t *
+get_iseq_if_available(CALL_CACHE cc)
+{
+    if (GET_GLOBAL_METHOD_STATE() == cc->method_state
+	&& mjit_valid_class_serial_p(cc->class_serial)
+	&& cc->me && cc->me->def->type == VM_METHOD_TYPE_ISEQ) {
+	return rb_iseq_check(cc->me->def->body.iseq.iseqptr);
+    }
+    return NULL;
+}
+
+/* TODO: move to somewhere shared with vm_args.c */
+#define IS_ARGS_SPLAT(ci)   ((ci)->flag & VM_CALL_ARGS_SPLAT)
+#define IS_ARGS_KEYWORD(ci) ((ci)->flag & VM_CALL_KWARG)
+
+/* Returns TRUE if iseq is inlinable, otherwise NULL. This becomes TRUE in the same condition
+   as CI_SET_FASTPATH (in vm_callee_setup_arg) is called from vm_call_iseq_setup. */
+static int
+inlinable_iseq_p(CALL_INFO ci, CALL_CACHE cc, const rb_iseq_t *iseq)
+{
+    extern int simple_iseq_p(const rb_iseq_t *iseq);
+    return iseq != NULL
+	&& simple_iseq_p(iseq) && !(ci->flag & VM_CALL_KW_SPLAT) /* top of vm_callee_setup_arg */
+	&& (!IS_ARGS_SPLAT(ci) && !IS_ARGS_KEYWORD(ci) && !(METHOD_ENTRY_VISI(cc->me) == METHOD_VISI_PROTECTED)); /* CI_SET_FASTPATH */
+}
+
+/* Compiles vm_search_method and CALL_METHOD macro to f. `calling` should be already defined in `f`. */
 static void
 fprint_call_method(FILE *f, VALUE ci_v, VALUE cc_v, unsigned int result_pos)
 {
+    const rb_iseq_t *iseq;
+    CALL_CACHE cc = (CALL_CACHE)cc_v;
+
     fprintf(f, "    {\n");
     fprintf(f, "      VALUE v;\n");
 
-    fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+    if (inlinable_iseq_p((CALL_INFO)ci_v, cc, iseq = get_iseq_if_available(cc))) {
+	/* Inline vm_call_iseq_setup_normal for vm_call_iseq_setup_func FASTPATH */
+	int param_size = iseq->body->param.size; /* TODO: check calling->argc for argument_arity_error */
+
+	fprintf(f, "      if (GET_GLOBAL_METHOD_STATE() == %llu && RCLASS_SERIAL(CLASS_OF(calling.recv)) == %llu) {\n", cc->method_state, cc->class_serial);
+	fprintf(f, "        VALUE *argv = cfp->sp - calling.argc;\n");
+	fprintf(f, "        cfp->sp = argv - 1;\n"); /* recv */
+	fprintf(f, "        vm_push_frame(ec, 0x%"PRIxVALUE", VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL, calling.recv, "
+		"calling.block_handler, 0x%"PRIxVALUE", 0x%"PRIxVALUE", argv + %d, %d, %d);\n",
+		(VALUE)iseq, (VALUE)cc->me, (VALUE)iseq->body->iseq_encoded, param_size, iseq->body->local_table_size - param_size, iseq->body->stack_max);
+	fprintf(f, "        v = Qundef;\n");
+	fprintf(f, "      } else {\n");
+	fprintf(f, "        vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
+	fprintf(f, "        v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+	fprintf(f, "      }\n");
+    }
+    else {
+	fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", ci_v, cc_v);
+	fprintf(f, "      v = (*((CALL_CACHE)0x%"PRIxVALUE")->call)(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", cc_v, ci_v, cc_v);
+    }
 
     fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n");
     fprintf(f, "        VM_ENV_FLAGS_SET(ec->cfp->ep, VM_FRAME_FLAG_FINISH);\n"); /* This is vm_call0_body's code after vm_call_iseq_setup */
@@ -90,7 +139,6 @@ compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, 
     }
     fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
     fprintf(f, "    calling.recv = stack[%d];\n", stack_size - 1 - argc);
-    fprintf(f, "    vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv);\n", operands[0], operands[1]);
     fprint_call_method(f, operands[0], operands[1], stack_size - argc - 1);
     fprintf(f, "  }\n");
     return -argc;
@@ -126,7 +174,7 @@ fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int res
     /* CALL_SIMPLE_METHOD */
     fprintf(f, "      calling.block_handler = VM_BLOCK_HANDLER_NONE;\n");
     fprintf(f, "      calling.argc = %d;\n", argc - 1); /* -1 is recv */
-    fprintf(f, "      vm_search_method(0x%"PRIxVALUE", 0x%"PRIxVALUE", calling.recv = recv);\n", ci, cc);
+    fprintf(f, "      calling.recv = recv;\n");
     fprint_call_method(f, ci, cc, result_pos);
     fprintf(f, "    } else {\n");
     fprintf(f, "      stack[%d] = result;\n", result_pos);
