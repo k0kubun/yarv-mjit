@@ -23,15 +23,10 @@ module MJITHeader
 
   # Return start..stop of last decl in CODE ending STOP
   def self.find_decl(code, stop)
-    level = start = 0
-
+    level = 0
     stop.downto(0) do |i|
-      if level == 0 && (i == 0 || code[i] == ';' || code[i] == '}')
-        start = i
-        found = true if stop != start
-        start = -1 if i == 0 && code[i] != ';' && code[i] != '}'
-        return start + 1..stop if found
-        level += 1 if code[i] == '}'
+      if level == 0 && stop != i && decl_found?(code, i)
+        return decl_start(code, i)..stop
       elsif code[i] == '}'
         level += 1
       elsif code[i] == '{'
@@ -39,6 +34,18 @@ module MJITHeader
       end
     end
     0..-1
+  end
+
+  def self.decl_found?(code, i)
+    i == 0 || code[i] == ';' || code[i] == '}'
+  end
+
+  def self.decl_start(code, i)
+    if i == 0 && code[i] != ';' && code[i] != '}'
+      0
+    else
+      i + 1
+    end
   end
 
   # Given DECL return the name of it, nil if failed
