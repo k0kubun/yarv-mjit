@@ -52,6 +52,20 @@ fprint_setlocal(FILE *f, unsigned int pop_pos, lindex_t idx, rb_num_t level)
     }
 }
 
+/* push back stack in local variable to YARV's stack pointer */
+static void
+fprint_args(FILE *f, unsigned int argc, unsigned int base_pos)
+{
+    if (argc) {
+	unsigned int i;
+	/* TODO: use memmove or memcopy, if not optimized by compiler */
+	for (i = 0; i < argc; i++) {
+	    fprintf(f, "    *(cfp->sp) = stack[%d];\n", base_pos + i);
+	    fprintf(f, "    cfp->sp++;\n");
+	}
+    }
+}
+
 /* Returns iseq from cc if it's available and still not obsoleted. */
 static const rb_iseq_t *
 get_iseq_if_available(CALL_CACHE cc)
@@ -129,12 +143,14 @@ compile_send(FILE *f, int insn, const VALUE *operands, unsigned int stack_size, 
     if (inlinable_iseq_p(ci, cc, get_iseq_if_available(cc))) {
 	fprintf(f, "  if (UNLIKELY(GET_GLOBAL_METHOD_STATE() != %llu || RCLASS_SERIAL(CLASS_OF(stack[%d])) != %llu)) {\n", cc->method_state, stack_size - 1 - argc, cc->class_serial);
 	fprintf(f, "    cfp->pc -= %d;\n", insn_len(insn));
-	fprintf(f, "    return Qundef; /* cancel JIT */\n");
+	fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
+	fprintf(f, "    goto cancel;\n");
 	fprintf(f, "  }\n");
     }
 
     fprintf(f, "  {\n");
     fprintf(f, "    struct rb_calling_info calling;\n");
+    fprint_args(f, argc + 1, stack_size - argc - 1); /* +1 is for recv */
     if (with_block) {
 	fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", FALSE);\n", operands[0], operands[2]);
     }
@@ -166,13 +182,19 @@ fprint_opt_call_fallback(FILE *f, int insn, VALUE ci, VALUE cc, unsigned int res
     fprintf(f, "    if (result == Qundef) {\n");
     fprintf(f, "      struct rb_calling_info calling;\n");
     if (key) {
-	if (argc == 3) { /* for opt_aset_with, move the position of `val` and put the key */
-	    fprintf(f, "      *(cfp->sp) = *(cfp->sp - 1);\n");
-	    fprintf(f, "      *(cfp->sp - 1) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
-	    fprintf(f, "      cfp->sp++;\n");
+	fprintf(f, "      *(cfp->sp++) = recv;\n");
+	fprintf(f, "      *(cfp->sp++) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
+	if (argc == 3) { /* for opt_aset_with */
+	    fprintf(f, "      *(cfp->sp++) = obj;\n");
 	}
-	else { /* for opt_aref_with, just put the key */
-	    fprintf(f, "      *(cfp->sp++) = rb_str_resurrect(0x%"PRIxVALUE");\n", key);
+    }
+    else {
+	fprintf(f, "      *(cfp->sp++) = recv;\n");
+	if (argc >= 2) {
+	    fprintf(f, "      *(cfp->sp++) = obj;\n");
+	}
+	if (argc >= 3) {
+	    fprintf(f, "      *(cfp->sp++) = obj2;\n");
 	}
     }
     /* CALL_SIMPLE_METHOD */
@@ -257,7 +279,7 @@ fprint_trace_cancel(FILE *f, unsigned int stack_size)
 {
     fprintf(f, "  if (ruby_vm_event_enabled_flags & ISEQ_TRACE_EVENTS) {\n");
     fprintf(f, "    cfp->sp = cfp->bp + %d;\n", stack_size + 1);
-    fprintf(f, "    return Qundef; /* cancel JIT */\n");
+    fprintf(f, "    goto cancel;\n"); /* TODO: discard JIT-ed code */
     fprintf(f, "  }\n");
 }
 
@@ -278,8 +300,6 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 
     /* Move program counter to meet catch table condition and for JIT execution cancellation. */
     fprintf(f, "  cfp->pc = (VALUE *)0x%"PRIxVALUE";\n", (VALUE)(body->iseq_encoded + next_pos));
-    /* Move stack pointer to let stack values be used by VM when exception is raised */
-    fprintf(f, "  cfp->sp = cfp->bp + %d;\n", b->stack_size + 1); /* Note: This line makes JIT slow */
 
     switch (insn) {
       case BIN(nop):
@@ -384,11 +404,14 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	break;
       case BIN(expandarray):
 	{
-	    unsigned int space_size;
+	    unsigned int i, space_size;
 	    space_size = (unsigned int)operands[0] + (unsigned int)((int)operands[1] & 0x01);
 
-	    fprintf(f, "  cfp->sp = cfp->bp + %d;\n", b->stack_size); /* For `VALUE ary` argument. TODO: cfp->sp should be set once */
 	    fprintf(f, "  vm_expandarray(cfp, stack[%d], 0x%"PRIxVALUE", (int)0x%"PRIxVALUE");\n", --b->stack_size, operands[0], operands[1]);
+	    for (i = 0; i < space_size; i++) {
+		fprintf(f, "  cfp->sp--;\n");
+		fprintf(f, "  stack[%d] = *(cfp->sp);\n", b->stack_size + space_size - 1 - i);
+	    }
 	    b->stack_size += space_size;
 	}
 	break;
@@ -525,6 +548,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "  {\n");
 	    fprintf(f, "    struct rb_calling_info calling;\n");
 	    fprintf(f, "    calling.argc = %d;\n", ci->orig_argc);
+	    fprint_args(f, push_count + 1, b->stack_size - push_count - 1);
 	    fprintf(f, "    vm_caller_setup_arg_block(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE", TRUE);\n", operands[0], operands[2]);
 	    fprintf(f, "    calling.recv = cfp->self;\n");
 	    fprintf(f, "    vm_search_super_method(ec, cfp, &calling, 0x%"PRIxVALUE", 0x%"PRIxVALUE");\n", operands[0], operands[1]);
@@ -558,6 +582,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "      rb_vm_localjump_error(\"no block given (yield)\", Qnil, 0);\n");
 	    fprintf(f, "    }\n");
 
+	    fprint_args(f, ci->orig_argc, b->stack_size - ci->orig_argc);
 	    fprintf(f, "    {\n");
 	    fprintf(f, "      VALUE v = vm_invoke_block(ec, cfp, &calling, 0x%"PRIxVALUE", block_handler);\n", operands[0]);
 	    fprintf(f, "      if (v == Qundef && (v = mjit_exec(ec)) == Qundef) {\n");
@@ -811,6 +836,18 @@ compile_insns(FILE *f, const struct rb_iseq_constant_body *body, unsigned int st
     }
 }
 
+/* Print basic block code to cancel JIT execution. */
+static void
+compile_cancel_handler(FILE *f, const struct rb_iseq_constant_body *body)
+{
+    unsigned int i;
+    fprintf(f, "cancel:\n");
+    for (i = 0; i < body->stack_max; i++) {
+	fprintf(f, "  *((VALUE *)cfp->bp + %d) = stack[%d];\n", i + 1, i);
+    }
+    fprintf(f, "  return Qundef;\n");
+}
+
 /* Compile ISeq to C code in F.  It returns 1 if it succeeds to compile. */
 int
 mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *funcname)
@@ -820,7 +857,9 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
     status.compiled_for_pos = ZALLOC_N(int, body->iseq_size);
 
     fprintf(f, "VALUE %s(rb_execution_context_t *ec, rb_control_frame_t *cfp) {\n", funcname);
-    fprintf(f, "  VALUE *stack = cfp->sp;\n");
+    if (body->stack_max > 0) {
+	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
+    }
 
     /* Simulate `opt_pc` in setup_parameters_complex */
     if (body->param.flags.has_opt) {
@@ -841,6 +880,7 @@ mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *func
     fprintf(f, "  }\n");
 
     compile_insns(f, body, 0, 0, &status);
+    compile_cancel_handler(f, body);
     fprintf(f, "}\n");
 
     xfree(status.compiled_for_pos);
