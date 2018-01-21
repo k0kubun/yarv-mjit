@@ -922,6 +922,7 @@ cont_restore_1(rb_context_t *cont)
     }
 #endif
 
+    mjit_preserve_stack();
     ruby_longjmp(cont->jmpbuf, 1);
 }
 

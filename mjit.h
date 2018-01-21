@@ -67,9 +67,10 @@ extern int mjit_init_p;
 
 extern void mjit_add_iseq_to_process(const rb_iseq_t *iseq);
 extern mjit_func_t mjit_get_iseq_func(const struct rb_iseq_constant_body *body);
+extern void mjit_preserve_stack(void);
 RUBY_SYMBOL_EXPORT_END
 
-extern int mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *funcname);
+extern int mjit_compile(FILE *f, struct rb_iseq_constant_body *body, const char *funcname);
 extern void mjit_init(struct mjit_options *opts);
 extern void mjit_finish(void);
 extern void mjit_gc_start_hook(void);

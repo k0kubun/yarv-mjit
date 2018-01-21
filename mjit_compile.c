@@ -300,6 +300,9 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 
     /* Move program counter to meet catch table condition and for JIT execution cancellation. */
     fprintf(f, "  cfp->pc = (VALUE *)0x%"PRIxVALUE";\n", (VALUE)(body->iseq_encoded + next_pos));
+    /* Set stack size to restore stack from body->jit_stack. The value here is just a default value,
+       and this should be fixed for each insn. The value should be the stack size DURING the insn execution. */
+    body->pc_sp_offsets[next_pos] = b->stack_size;
 
     switch (insn) {
       case BIN(nop):
@@ -370,6 +373,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "  stack[%d] = rb_str_concat_literals(0x%"PRIxVALUE", stack + %d);\n",
 		b->stack_size - (unsigned int)operands[0], operands[0], b->stack_size - (unsigned int)operands[0]);
 	b->stack_size += 1 - (unsigned int)operands[0];
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(tostring):
 	fprintf(f, "  {\n");
@@ -377,9 +381,11 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    stack[%d] = rb_obj_as_string_result(stack[%d], stack[%d]);\n", b->stack_size-2, b->stack_size-1, b->stack_size-2);
 	fprintf(f, "  }\n");
 	b->stack_size--;
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(freezestring):
 	fprintf(f, "  vm_freezestring(stack[%d], 0x%"PRIxVALUE");\n", b->stack_size-1, operands[0]);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(toregexp):
 	fprintf(f, "  {\n");
@@ -390,14 +396,17 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    rb_ary_clear(ary);\n");
 	fprintf(f, "  }\n");
 	b->stack_size += 1 - (unsigned int)operands[1];
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(intern):
 	fprintf(f, "  stack[%d] = rb_str_intern(stack[%d]);\n", b->stack_size-1, b->stack_size-1);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(newarray):
 	fprintf(f, "  stack[%d] = rb_ary_new4(0x%"PRIxVALUE", stack + %d);\n",
 		b->stack_size - (unsigned int)operands[0], operands[0], b->stack_size - (unsigned int)operands[0]);
 	b->stack_size += 1 - (unsigned int)operands[0];
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(duparray):
 	fprintf(f, "  stack[%d] = rb_ary_resurrect(0x%"PRIxVALUE");\n", b->stack_size++, operands[0]);
@@ -408,6 +417,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    space_size = (unsigned int)operands[0] + (unsigned int)((int)operands[1] & 0x01);
 
 	    fprintf(f, "  vm_expandarray(cfp, stack[%d], 0x%"PRIxVALUE", (int)0x%"PRIxVALUE");\n", --b->stack_size, operands[0], operands[1]);
+	    body->pc_sp_offsets[next_pos] = b->stack_size;
 	    for (i = 0; i < space_size; i++) {
 		fprintf(f, "  cfp->sp--;\n");
 		fprintf(f, "  stack[%d] = *(cfp->sp);\n", b->stack_size + space_size - 1 - i);
@@ -418,9 +428,11 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case BIN(concatarray):
 	fprintf(f, "  stack[%d] = vm_concat_array(stack[%d], stack[%d]);\n", b->stack_size-2, b->stack_size-2, b->stack_size-1);
 	b->stack_size--;
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(splatarray):
 	fprintf(f, "  stack[%d] = vm_splat_array(0x%"PRIxVALUE", stack[%d]);\n", b->stack_size-1, operands[0], b->stack_size-1);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(newhash):
 	fprintf(f, "  {\n");
@@ -433,10 +445,12 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    stack[%d] = val;\n", b->stack_size - (unsigned int)operands[0]);
 	fprintf(f, "  }\n");
 	b->stack_size += 1 - (unsigned int)operands[0];
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(newrange):
 	fprintf(f, "  stack[%d] = rb_range_new(stack[%d], stack[%d], (int)0x%"PRIxVALUE");\n", b->stack_size-2, b->stack_size-2, b->stack_size-1, operands[0]);
 	b->stack_size--;
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(pop):
 	b->stack_size--;
@@ -491,10 +505,12 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
       case BIN(defined):
 	fprintf(f, "  stack[%d] = vm_defined(ec, cfp, 0x%"PRIxVALUE", 0x%"PRIxVALUE", 0x%"PRIxVALUE", stack[%d]);\n",
 		b->stack_size-1, operands[0], operands[1], operands[2], b->stack_size-1);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(checkmatch):
 	fprintf(f, "  stack[%d] = vm_check_match(ec, stack[%d], stack[%d], 0x%"PRIxVALUE");\n", b->stack_size-2, b->stack_size-2, b->stack_size-1, operands[0]);
 	b->stack_size--;
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(checkkeyword):
 	fprintf(f, "  stack[%d] = vm_check_keyword(0x%"PRIxVALUE", 0x%"PRIxVALUE", cfp->ep);\n",
@@ -508,6 +524,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	break; */
       case BIN(send):
 	b->stack_size += compile_send(f, insn, operands, b->stack_size, TRUE);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	fprint_trace_cancel(f, b->stack_size);
 	break;
       case BIN(opt_str_freeze):
@@ -530,14 +547,17 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "  stack[%d] = vm_opt_newarray_max(0x%"PRIxVALUE", stack + %d);\n",
 		b->stack_size - (unsigned int)operands[0], operands[0], b->stack_size - (unsigned int)operands[0]);
 	b->stack_size += 1 - (unsigned int)operands[0];
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_newarray_min):
 	fprintf(f, "  stack[%d] = vm_opt_newarray_min(0x%"PRIxVALUE", stack + %d);\n",
 		b->stack_size - (unsigned int)operands[0], operands[0], b->stack_size - (unsigned int)operands[0]);
 	b->stack_size += 1 - (unsigned int)operands[0];
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_send_without_block):
 	b->stack_size += compile_send(f, insn, operands, b->stack_size, FALSE);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	fprint_trace_cancel(f, b->stack_size);
 	break;
       case BIN(invokesuper):
@@ -563,6 +583,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    }\n");
 	    fprintf(f, "  }\n");
 	    b->stack_size -= push_count;
+	    body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	    fprint_trace_cancel(f, b->stack_size);
 	}
 	break;
@@ -594,6 +615,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    fprintf(f, "    }\n");
 	    fprintf(f, "  }\n");
 	    b->stack_size += 1 - ci->orig_argc;
+	    body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	    fprint_trace_cancel(f, b->stack_size);
 	}
 	break;
@@ -635,6 +657,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    RUBY_VM_CHECK_INTS(ec);\n");
 	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
 	fprintf(f, "  }\n");
+	body->pc_sp_offsets[next_pos] = b->stack_size;
 	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
 	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
 	break;
@@ -643,6 +666,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    RUBY_VM_CHECK_INTS(ec);\n");
 	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
 	fprintf(f, "  }\n");
+	body->pc_sp_offsets[next_pos] = b->stack_size;
 	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
 	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
 	break;
@@ -651,6 +675,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    RUBY_VM_CHECK_INTS(ec);\n");
 	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[0]);
 	fprintf(f, "  }\n");
+	body->pc_sp_offsets[next_pos] = b->stack_size;
 	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
 	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];
 	break;
@@ -659,6 +684,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "    RUBY_VM_CHECK_INTS(ec);\n");
 	fprintf(f, "    goto label_%d;\n", pos + insn_len(insn) + (unsigned int)operands[1]);
 	fprintf(f, "  }\n");
+	body->pc_sp_offsets[next_pos] = b->stack_size;
 	compile_insns(f, body, b->stack_size, pos + insn_len(insn), status);
 	next_pos = pos + insn_len(insn) + (unsigned int)operands[1];
 	break;
@@ -683,6 +709,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	    arg.last_value = Qundef;
 
 	    fprintf(f, "  switch (vm_case_dispatch(0x%"PRIxVALUE", 0x%"PRIxVALUE", stack[%d])) {\n", operands[0], operands[1], --b->stack_size);
+	    body->pc_sp_offsets[next_pos] = b->stack_size;
 	    st_foreach(RHASH_TBL_RAW(operands[0]), compile_case_dispatch_each, (VALUE)&arg);
 	    fprintf(f, "    case %lu:\n", operands[1]);
 	    fprintf(f, "      goto label_%lu;\n", arg.base_pos + operands[1]);
@@ -691,78 +718,101 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	break;
       case BIN(opt_plus):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_plus(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_minus):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_minus(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_mult):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_mult(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_div):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_div(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_mod):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_mod(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_eq):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2,
 		"opt_eq_func(recv, obj, 0x%"PRIxVALUE", 0x%"PRIxVALUE")", operands[0], operands[1]);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_neq):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2,
 		"vm_opt_neq(0x%"PRIxVALUE", 0x%"PRIxVALUE", 0x%"PRIxVALUE", 0x%"PRIxVALUE", recv, obj)",
 		operands[0], operands[1], operands[2], operands[3]);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_lt):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_lt(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_le):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_le(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_gt):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_gt(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_ge):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_ge(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_ltlt):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_ltlt(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_aref):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_aref(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_aset):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 3, "vm_opt_aset(recv, obj, obj2)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_aset_with):
 	b->stack_size += fprint_opt_call_with_key(f, insn, operands[0], operands[1], operands[2], b->stack_size, 3,
 		"vm_opt_aset_with(recv, 0x%"PRIxVALUE", obj)", operands[2]);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_aref_with):
 	b->stack_size += fprint_opt_call_with_key(f, insn, operands[0], operands[1], operands[2], b->stack_size, 2,
 		"vm_opt_aref_with(recv, 0x%"PRIxVALUE")", operands[2]);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_length):
 	fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 1, "vm_opt_length(recv, BOP_LENGTH)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_size):
 	fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 1, "vm_opt_length(recv, BOP_SIZE)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_empty_p):
 	fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 1, "vm_opt_empty_p(recv)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_succ):
 	fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 1, "vm_opt_succ(recv)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_not):
 	fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 1,
 		"vm_opt_not(0x%"PRIxVALUE", 0x%"PRIxVALUE", recv)", operands[0], operands[1]);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_regexpmatch1):
 	fprintf(f, "  stack[%d] = vm_opt_regexpmatch1((VALUE)0x%"PRIxVALUE", stack[%d]);\n", b->stack_size-1, operands[0], b->stack_size-1);
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(opt_regexpmatch2):
 	b->stack_size += fprint_opt_call(f, insn, operands[0], operands[1], b->stack_size, 2, "vm_opt_regexpmatch2(recv, obj)");
+	body->pc_sp_offsets[next_pos] = b->stack_size - 1; /* -1 to remove result */
 	break;
       case BIN(bitblt):
 	fprintf(f, "  stack[%d] = rb_str_new2(\"a bit of bacon, lettuce and tomato\");\n", b->stack_size++);
@@ -850,15 +900,21 @@ compile_cancel_handler(FILE *f, const struct rb_iseq_constant_body *body)
 
 /* Compile ISeq to C code in F.  It returns 1 if it succeeds to compile. */
 int
-mjit_compile(FILE *f, const struct rb_iseq_constant_body *body, const char *funcname)
+mjit_compile(FILE *f, struct rb_iseq_constant_body *body, const char *funcname)
 {
     struct compile_status status;
     status.success = TRUE;
     status.compiled_for_pos = ZALLOC_N(int, body->iseq_size);
 
+    /* This buffer has: pc_sp_offsets[<sp offset>] = <pc offset>. It's not st because JIT thread
+       should not invoke Ruby methods. Ideally this should be st like { sp offset -> pc offset }. */
+    body->pc_sp_offsets = ZALLOC_N(unsigned int, body->iseq_size + 1); /* -1 for compile_insn convenience */
+
     fprintf(f, "VALUE %s(rb_execution_context_t *ec, rb_control_frame_t *cfp) {\n", funcname);
     if (body->stack_max > 0) {
 	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
+	fprintf(f, "  cfp->sp = cfp->ep + %d;\n", 1 + body->stack_max); /* preserve place to write back values */
+	fprintf(f, "  cfp->jit_stack = stack;\n"); /* used by `mjit_preserve_stack` */
     }
 
     /* Simulate `opt_pc` in setup_parameters_complex */

@@ -1278,6 +1278,39 @@ mjit_valid_class_serial_p(rb_serial_t class_serial)
     return found_p;
 }
 
+/* Preserve JIT's function-local variables to VM's value stack, which are going to be
+   expired by ruby_longjmp(), and restore cfp->sp. */
+void
+mjit_preserve_stack(void)
+{
+    const rb_iseq_t *iseq;
+    ptrdiff_t i, size;
+    rb_control_frame_t *cfp;
+    const rb_control_frame_t *end_cfp;
+    rb_execution_context_t *ec;
+
+    if (!mjit_init_p)
+	return;
+    ec = GET_EC();
+    if (ec->vm_stack == NULL)
+        return;
+
+    end_cfp = RUBY_VM_END_CONTROL_FRAME(ec);
+    size = end_cfp - ec->cfp;
+    for (i = 0, cfp = (rb_control_frame_t *)end_cfp - 1; i < size; i++, cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
+        if (cfp->pc && (iseq = cfp->iseq) != NULL
+	    && imemo_type((VALUE)iseq) == imemo_iseq
+	    && cfp->jit_stack != NULL && iseq->body->pc_sp_offsets != NULL) {
+	    unsigned int i, stack_size = iseq->body->pc_sp_offsets[cfp->pc - iseq->body->iseq_encoded];
+	    fprintf(stderr, "CANCEL: %d\n", stack_size);
+	    cfp->sp = (VALUE *)cfp->ep + 1;
+	    for (i = 0; i < stack_size; i++) {
+		*(cfp->sp++) = cfp->jit_stack[i];
+	    }
+        }
+    }
+}
+
 void
 Init_MJIT(void)
 {

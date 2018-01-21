@@ -187,6 +187,8 @@ NORETURN(static inline void rb_ec_tag_jump(const rb_execution_context_t *ec, enu
 static inline void
 rb_ec_tag_jump(const rb_execution_context_t *ec, enum ruby_tag_type st)
 {
+    extern void mjit_preserve_stack(void);
+    mjit_preserve_stack();
     ec->tag->state = st;
     ruby_longjmp(ec->tag->buf, 1);
 }
