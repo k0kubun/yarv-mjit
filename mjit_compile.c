@@ -913,7 +913,6 @@ mjit_compile(FILE *f, struct rb_iseq_constant_body *body, const char *funcname)
     fprintf(f, "VALUE %s(rb_execution_context_t *ec, rb_control_frame_t *cfp) {\n", funcname);
     if (body->stack_max > 0) {
 	fprintf(f, "  VALUE stack[%d];\n", body->stack_max);
-	fprintf(f, "  cfp->sp = cfp->ep + %d;\n", 1 + body->stack_max); /* preserve place to write back values */
 	fprintf(f, "  cfp->jit_stack = stack;\n"); /* used by `mjit_preserve_stack` */
     }
 
