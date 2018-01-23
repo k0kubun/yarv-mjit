@@ -1286,6 +1286,7 @@ mjit_extend_stack(const rb_control_frame_t *base_cfp, const rb_control_frame_t *
     if (size == 0)
 	return;
 
+    fprintf(stderr, "STACK_CANCEL: +%d\n", size);
     for (cfp = (rb_control_frame_t *)RUBY_VM_NEXT_CONTROL_FRAME(base_cfp); cfp >= top_cfp; cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
 	const VALUE *prev_ep;
 	cfp->sp += size;
