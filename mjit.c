@@ -1286,7 +1286,6 @@ mjit_extend_stack(const rb_control_frame_t *base_cfp, const rb_control_frame_t *
     if (size == 0)
 	return;
 
-    fprintf(stderr, "STACK_CANCEL: +%d\n", size);
     for (cfp = (rb_control_frame_t *)RUBY_VM_NEXT_CONTROL_FRAME(base_cfp); cfp >= top_cfp; cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
 	const VALUE *prev_ep;
 	cfp->sp += size;
@@ -1329,14 +1328,19 @@ mjit_preserve_stack(void)
         if (cfp->pc && (iseq = cfp->iseq) != NULL
 	    && imemo_type((VALUE)iseq) == imemo_iseq
 	    && cfp->jit_stack != NULL && iseq->body->pc_sp_offsets != NULL) {
-	    unsigned int i, stack_size = iseq->body->pc_sp_offsets[cfp->pc - iseq->body->iseq_encoded];
+	    unsigned int i, sp_inc, stack_size;
+	    stack_size = iseq->body->pc_sp_offsets[cfp->pc - iseq->body->iseq_encoded];
 	    if (stack_size == 0)
 		continue;
 
-	    if (cfp != ec->cfp) /* if it's not the top frame, higher stacks should be moved */
-		mjit_extend_stack(cfp, ec->cfp, (cfp->ep + 1 + stack_size) - cfp->sp);
+	    sp_inc = (cfp->bp + 1 + stack_size) - cfp->sp;
+	    if (sp_inc == 0)
+		continue;
 
-	    cfp->sp = (VALUE *)cfp->ep + 1;
+	    if (cfp != ec->cfp) /* if it's not the top frame, higher stacks should be moved */
+		mjit_extend_stack(cfp, ec->cfp, sp_inc);
+
+	    cfp->sp = (VALUE *)cfp->bp + 1;
 	    for (i = 0; i < stack_size; i++) {
 		*(cfp->sp++) = cfp->jit_stack[i];
 	    }

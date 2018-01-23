@@ -646,6 +646,7 @@ compile_insn(FILE *f, const struct rb_iseq_constant_body *body, const int insn, 
 	fprintf(f, "  ec->errinfo = vm_throw(ec, cfp, 0x%"PRIxVALUE", stack[%d]);\n", operands[0], --b->stack_size);
 	fprintf(f, "  EC_JUMP_TAG(ec, ec->tag->state);\n");
 	b->finish_p = TRUE;
+	body->pc_sp_offsets[next_pos] = b->stack_size;
 	break;
       case BIN(jump):
 	next_pos = pos + insn_len(insn) + (unsigned int)operands[0];

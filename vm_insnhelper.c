@@ -226,6 +226,7 @@ vm_push_frame(rb_execution_context_t *ec,
     cfp->iseq = (rb_iseq_t *)iseq;
     cfp->self = self;
     cfp->block_code = NULL;
+    cfp->jit_stack = NULL;
 
     /* setup vm value stack */
 
