@@ -42,26 +42,20 @@
 %
 % # JIT: move sp and pc if necessary
 % if insn.handles_frame?
-        fprintf(f, "  reg_cfp->pc = (VALUE *)0x%"PRIxVALUE";\n", (VALUE)(body->iseq_encoded + next_pos)); /* ADD_PC(INSN_ATTR(width)); */
-        fprintf(f, "  reg_cfp->sp = reg_cfp->bp + %d;\n", b->stack_size + 1 - <%= insn.pops.size %>); /* POPN(INSN_ATTR(popn)); */
+        fprintf(f, "    reg_cfp->pc = (VALUE *)0x%"PRIxVALUE";\n", (VALUE)(body->iseq_encoded + next_pos)); /* ADD_PC(INSN_ATTR(width)); */
+        fprintf(f, "    reg_cfp->sp = reg_cfp->bp + %d;\n", b->stack_size + 1 - <%= insn.pops.size %>); /* POPN(INSN_ATTR(popn)); */
 % else
-        fprintf(f, "  reg_cfp->pc = (VALUE *)0x%"PRIxVALUE";\n", (VALUE)(body->iseq_encoded + pos));
-        fprintf(f, "  reg_cfp->sp = reg_cfp->bp + %d;\n", b->stack_size + 1);
+        fprintf(f, "    reg_cfp->pc = (VALUE *)0x%"PRIxVALUE";\n", (VALUE)(body->iseq_encoded + pos));
+        fprintf(f, "    reg_cfp->sp = reg_cfp->bp + %d;\n", b->stack_size + 1);
 % end
 %
 % # JIT: Print insn body in insns.def
 % insn.expr.expr.each_line do |line|
 %   # Special macro expansion for ones that can't be resolved by macro redefinition.
 %   if line =~ /\A\s+ADD_PC\((?<add_pc>[^)]+)\);\s+(\/\*.+\*\/)?\s+\z/ # TODO: create some another macro to avoid this
-        operands += <%= Regexp.last_match[:add_pc] %>; /* ADD_PC() !!! */
+        /* Skip ADD_PC */
 %   elsif line =~ /\A\s+DISPATCH_ORIGINAL_INSN\((?<insn_name>[^)]+)\);\s+\z/
-%     insn_name = Regexp.last_match[:insn_name]
-%     dispatch_insn = RubyVM::BareInstructions.fetch(insn_name)
-
-    fprintf(f, "\n/* --- BEGIN: <%= line.strip %> --- */\n");
-<%= render 'mjit_compile_insn', locals: { insn: dispatch_insn, dispatched: true } -%>
-    fprintf(f, "/* --- END: <%= line.strip %> --- */\n\n");
-
+        fprintf(f, "            return Qundef;\n");
 %   elsif line =~ /\A\s+JUMP\((?<dest>[^)]+)\);\s+\z/
 %     # Before we `goto` next insn, we need to set return values, especially for getinlinecache
 %     insn.rets.reverse_each.with_index do |ret, i|
@@ -89,10 +83,10 @@
 %     end
 %   elsif line =~ /\A\s+RESTORE_REGS\(\);\s+\z/ # for `leave` only
 #if OPT_CALL_THREADED_CODE
-        fprintf(f, "        rb_ec_thread_ptr(ec)->retval = val;\n");
-        fprintf(f, "        return 0;\n");
+        fprintf(f, "            rb_ec_thread_ptr(ec)->retval = val;\n");
+        fprintf(f, "            return 0;\n");
 #else
-        fprintf(f, "        return val;\n");
+        fprintf(f, "            return val;\n");
 #endif
 %   else
         fprintf(f, <%= to_cstr.call(line) %>);
